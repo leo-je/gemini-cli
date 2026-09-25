@@ -83,6 +83,12 @@ export GEMINI_OPENAI_HEADERS='{"X-Tenant":"acme","X-Trace":"on"}'
   会在每一个请求上抛出一个既不说头名也不说变量名的
   `TypeError`，不如在启动时就说清楚。中文等非拉丁字符请先编码（例如百分号编码的 UTF-8）。
 - 与程序化传入的 `config.customHeaders` 同时存在时，**环境变量优先**。
+- 上游的 `GEMINI_CLI_CUSTOM_HEADERS`
+  在此模式下**不生效**。那个变量只在 GoogleGenAI分支被解析——它填出的
+  `baseHeaders` 只流向 `USE_GEMINI` / `USE_VERTEX_AI` / `GATEWAY` 与
+  `LOGIN_WITH_GOOGLE` /
+  `COMPUTE_ADC`，到不了 OpenAI 适配器。用它配过的头请改写到
+  `GEMINI_OPENAI_HEADERS`。
 
 ### `export` 与 `.env` 的优先级
 
