@@ -241,16 +241,30 @@ export class OpenAICompatibleClient {
   }
 
   private buildHeaders(accept: string): Record<string, string> {
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
-      Accept: accept,
-      'User-Agent': 'gemini-cli (openai-compatible)',
-      ...this.extraHeaders,
-    };
+    // Header names are case-insensitive on the wire, but a plain object spread
+    // treats `authorization` and `Authorization` as different keys — and `fetch`
+    // then *joins* both into one comma-separated value instead of replacing it,
+    // so `{"authorization":"Token abc"}` would send `Bearer key, Token abc` and
+    // the endpoint would reject the combined credential. Fold to lowercase for
+    // lookup so a configured header always replaces its default; keep the
+    // winning spelling for the emitted name.
+    const merged = new Map<string, [string, string]>();
+    const set = (name: string, value: string) =>
+      merged.set(name.toLowerCase(), [name, value]);
+
+    set('Content-Type', 'application/json');
+    set('Accept', accept);
+    set('User-Agent', 'gemini-cli (openai-compatible)');
     if (this.apiKey) {
-      headers['Authorization'] = `Bearer ${this.apiKey}`;
+      set('Authorization', `Bearer ${this.apiKey}`);
     }
-    return headers;
+    // Configured headers are applied last so they win. An endpoint that
+    // authenticates with `api-key` instead of a bearer token, or that wants a
+    // different Content-Type, has no other way to say so.
+    for (const [name, value] of Object.entries(this.extraHeaders)) {
+      set(name, value);
+    }
+    return Object.fromEntries([...merged.values()]);
   }
 
   private async post(

@@ -110,6 +110,135 @@ describe('OpenAIContentGenerator', () => {
     );
   });
 
+  it('sends headers configured through GEMINI_OPENAI_HEADERS', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      sseResponse([
+        dataFrame({
+          choices: [{ delta: { content: 'hi' }, finish_reason: 'stop' }],
+        }),
+      ]),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const generator = makeGenerator({
+      GEMINI_OPENAI_MODELID: 'gpt-4o',
+      GEMINI_OPENAI_HEADERS: '{"X-Tenant":"acme","X-Retries":3}',
+    });
+    await collectChunks(
+      await generator.generateContentStream(baseRequest, 'p', LlmRole.MAIN),
+    );
+
+    const headers = (fetchMock.mock.calls[0] as [string, RequestInit])[1]
+      .headers as Record<string, string>;
+    expect(headers['X-Tenant']).toBe('acme');
+    expect(headers['X-Retries']).toBe('3');
+    // The defaults are still there alongside them.
+    expect(headers['Authorization']).toBe('Bearer test-key');
+    expect(headers['Content-Type']).toBe('application/json');
+  });
+
+  it('lets a configured header replace a default one', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      sseResponse([
+        dataFrame({
+          choices: [{ delta: { content: 'hi' }, finish_reason: 'stop' }],
+        }),
+      ]),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    // Azure-style endpoints authenticate with `api-key`, and a gateway may
+    // want to replace the bearer token outright.
+    const generator = makeGenerator({
+      GEMINI_OPENAI_MODELID: 'gpt-4o',
+      GEMINI_OPENAI_HEADERS:
+        '{"Authorization":"Token abc","api-key":"secret","Content-Type":"application/json; charset=utf-8"}',
+    });
+    await collectChunks(
+      await generator.generateContentStream(baseRequest, 'p', LlmRole.MAIN),
+    );
+
+    const headers = (fetchMock.mock.calls[0] as [string, RequestInit])[1]
+      .headers as Record<string, string>;
+    expect(headers['Authorization']).toBe('Token abc');
+    expect(headers['api-key']).toBe('secret');
+    expect(headers['Content-Type']).toBe('application/json; charset=utf-8');
+  });
+
+  // Regression: header names are case-insensitive, so a naive object spread let
+  // `authorization` coexist with the default `Authorization` and `fetch` joined
+  // them into `Bearer key, Token abc` — the endpoint then rejected a credential
+  // the user had every reason to think they had replaced.
+  it('replaces a default header even when the configured name differs in case', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      sseResponse([
+        dataFrame({
+          choices: [{ delta: { content: 'hi' }, finish_reason: 'stop' }],
+        }),
+      ]),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const generator = makeGenerator({
+      GEMINI_OPENAI_MODELID: 'gpt-4o',
+      GEMINI_OPENAI_HEADERS:
+        '{"authorization":"Token abc","ACCEPT":"text/plain"}',
+    });
+    await collectChunks(
+      await generator.generateContentStream(baseRequest, 'p', LlmRole.MAIN),
+    );
+
+    const headers = (fetchMock.mock.calls[0] as [string, RequestInit])[1]
+      .headers as Record<string, string>;
+    const keys = Object.keys(headers);
+    // Exactly one spelling, and it carries only the configured value.
+    expect(keys.filter((k) => k.toLowerCase() === 'authorization')).toEqual([
+      'authorization',
+    ]);
+    expect(headers['authorization']).toBe('Token abc');
+    expect(keys.filter((k) => k.toLowerCase() === 'accept')).toEqual([
+      'ACCEPT',
+    ]);
+    expect(headers['ACCEPT']).toBe('text/plain');
+  });
+
+  it('lets the environment variable beat config.customHeaders', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      sseResponse([
+        dataFrame({
+          choices: [{ delta: { content: 'hi' }, finish_reason: 'stop' }],
+        }),
+      ]),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const generator = makeGenerator(
+      {
+        GEMINI_OPENAI_MODELID: 'gpt-4o',
+        GEMINI_OPENAI_HEADERS: '{"X-Tenant":"from-env","x-Only-Env":"e"}',
+      },
+      { customHeaders: { 'X-Tenant': 'from-config', 'X-Only-Config': 'c' } },
+    );
+    await collectChunks(
+      await generator.generateContentStream(baseRequest, 'p', LlmRole.MAIN),
+    );
+
+    const headers = (fetchMock.mock.calls[0] as [string, RequestInit])[1]
+      .headers as Record<string, string>;
+    expect(headers['X-Tenant']).toBe('from-env');
+    expect(headers['X-Only-Config']).toBe('c');
+    expect(headers['x-Only-Env']).toBe('e');
+  });
+
+  it('rejects a malformed header configuration', () => {
+    expect(() =>
+      makeGenerator({
+        GEMINI_OPENAI_MODELID: 'gpt-4o',
+        GEMINI_OPENAI_HEADERS: '{not json',
+      }),
+    ).toThrow(/GEMINI_OPENAI_HEADERS must be valid JSON/);
+  });
+
   it('appends /v1 to a bare origin', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       sseResponse([

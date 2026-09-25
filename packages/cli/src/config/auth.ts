@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { AuthType, loadApiKey } from '@google/gemini-cli-core';
+import { AuthType, loadApiKey, parseHeaderJson } from '@google/gemini-cli-core';
 import { loadEnvironment, loadSettings } from './settings.js';
 
 export async function validateAuthMethod(
@@ -57,6 +57,13 @@ export async function validateAuthMethod(
         'When using an OpenAI-compatible API, you must specify the GEMINI_OPENAI_MODELID environment variable.\n' +
         'Update your environment and try again (no reload needed if using .env)!'
       );
+    }
+    // A malformed GEMINI_OPENAI_HEADERS is reported here so the user sees the
+    // reason at startup instead of an unexplained rejection from the endpoint.
+    try {
+      parseHeaderJson(process.env['GEMINI_OPENAI_HEADERS']);
+    } catch (error) {
+      return error instanceof Error ? error.message : String(error);
     }
     // GEMINI_OPENAI_API_KEY is intentionally not required: local servers such as
     // Ollama and LM Studio accept unauthenticated requests.

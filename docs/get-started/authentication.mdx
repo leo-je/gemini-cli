@@ -378,6 +378,7 @@ To authenticate and use Gemini CLI with an OpenAI-compatible API:
    | `GEMINI_OPENAI_BASE_URL` | Yes      | Base URL of the endpoint. If the URL has no path, Gemini CLI appends `/v1`; otherwise the path is used as given.                        |
    | `GEMINI_OPENAI_API_KEY`  | No       | Bearer token sent in the `Authorization` header. Omit it if your endpoint doesn't require authentication, which is typical for local servers. |
    | `GEMINI_OPENAI_MODELID`  | Yes      | Identifier of the model to use, in the format your endpoint expects (for example, `gpt-4o`).                                             |
+   | `GEMINI_OPENAI_HEADERS`  | No       | Extra request headers as a JSON object. These replace the built-in headers, including `Authorization`.                                   |
 
    For example:
 
@@ -424,6 +425,26 @@ To authenticate and use Gemini CLI with an OpenAI-compatible API:
 > `GEMINI_OPENAI_MODELID` is authoritative in this mode. The `--model` flag and
 > the `GEMINI_MODEL` variable don't apply, because Gemini CLI's model aliases
 > and defaults refer to Gemini models.
+
+{/* prettier-ignore */}
+> [!NOTE]
+> `GEMINI_OPENAI_HEADERS` takes a flat JSON object of header names to values. Use
+> it when your endpoint authenticates with something other than a bearer token,
+> such as Azure's `api-key`, or when it requires a tenant identifier:
+>
+> ```bash
+> export GEMINI_OPENAI_HEADERS='{"api-key":"YOUR_KEY","X-Tenant":"acme"}'
+> ```
+>
+> Configured headers replace the built-in ones, so a value here overrides
+> `Authorization` and `Content-Type` as well. Header names are case-insensitive,
+> so `authorization` replaces the built-in `Authorization` rather than being sent
+> alongside it; writing the same header twice under different names is an error.
+>
+> Invalid JSON, an invalid header name, a value that isn't a string, number, or
+> boolean, a C0 control character other than tab, a DEL, and a character above
+> U+00FF are all reported at startup instead of being ignored. Header values are
+> bytes, so encode anything outside Latin-1 first.
 
 {/* prettier-ignore */}
 > [!IMPORTANT]

@@ -11,7 +11,8 @@ Completions 协议的端点。开启方式是设置
 
 ## 快速开始
 
-四个环境变量：
+四个环境变量（需要自定义请求头时再加
+`GEMINI_OPENAI_HEADERS`，见[环境变量](#环境变量)）：
 
 ```bash
 export GEMINI_API_TYPE="openai"                   # 模式开关，必须精确等于 openai
@@ -43,12 +44,45 @@ export GEMINI_OPENAI_MODELID="qwen2.5-coder:14b"
 
 ## 环境变量
 
-| 变量                     | 必需 | 说明                                                                                            |
-| :----------------------- | :--- | :---------------------------------------------------------------------------------------------- |
-| `GEMINI_API_TYPE`        | 是   | 模式开关。**区分大小写**，必须精确等于 `openai`。`OpenAI`、`openai `（带空格）都不会生效。      |
-| `GEMINI_OPENAI_BASE_URL` | 是   | 端点根地址。URL 没有路径时会自动补 `/v1`；已有路径则原样使用，所以需要 `/v1` 的端点请自己写全。 |
-| `GEMINI_OPENAI_API_KEY`  | 否   | 以 `Authorization: Bearer` 头发送。为空时不发送该头，适用于无鉴权的本地服务。                   |
-| `GEMINI_OPENAI_MODELID`  | 是   | 发给端点的模型名。**这是唯一权威来源，`--model` 和 `GEMINI_MODEL` 在此模式下无效。**            |
+| 变量                     | 必需 | 说明                                                                                                |
+| :----------------------- | :--- | :-------------------------------------------------------------------------------------------------- |
+| `GEMINI_API_TYPE`        | 是   | 模式开关。**区分大小写**，必须精确等于 `openai`。`OpenAI`、`openai `（带空格）都不会生效。          |
+| `GEMINI_OPENAI_BASE_URL` | 是   | 端点根地址。URL 没有路径时会自动补 `/v1`；已有路径则原样使用，所以需要 `/v1` 的端点请自己写全。     |
+| `GEMINI_OPENAI_API_KEY`  | 否   | 以 `Authorization: Bearer` 头发送。为空时不发送该头，适用于无鉴权的本地服务。                       |
+| `GEMINI_OPENAI_MODELID`  | 是   | 发给端点的模型名。**这是唯一权威来源，`--model` 和 `GEMINI_MODEL` 在此模式下无效。**                |
+| `GEMINI_OPENAI_HEADERS`  | 否   | 自定义请求头，JSON 对象。**可以覆盖任何内置头**（头名大小写不敏感），含 `Authorization`。详见下节。 |
+
+### 自定义请求头
+
+```bash
+export GEMINI_OPENAI_HEADERS='{"X-Tenant":"acme","X-Trace":"on"}'
+```
+
+| 场景                                     | 配置                                    |
+| :--------------------------------------- | :-------------------------------------- |
+| Azure OpenAI（用 `api-key` 而非 Bearer） | `{"api-key":"YOUR_KEY"}`                |
+| 自建网关要求自有鉴权方案                 | `{"Authorization":"Token abc123"}`      |
+| 端点要求租户/项目标识                    | `{"X-Tenant":"acme","X-Project":"web"}` |
+
+规则：
+
+- 值是**扁平 JSON 对象**，键为头名、值为字符串。数字和布尔会自动转成字符串，`{"X-Retries":3}`
+  可以写。但 JSON 数字按双精度浮点数解析：超出安全整数范围的整数会丢精度，`1e400`
+  会变成 `Infinity`。这类值请直接写成字符串。
+- **配置的头覆盖内置默认头**，包括
+  `Authorization`、`Content-Type`、`Accept`、`User-Agent`。这是刻意放开的：端点用什么头鉴权是它自己的事，适配器无从预判。
+- **头名大小写不敏感。** 写 `authorization` 一样会替换掉内置的
+  `Authorization`，不会变成两个头——HTTP 规范下同名的两个头会被合并成一个逗号拼接的值，`Bearer key, Token abc`
+  这种拼接凭据端点必然拒绝。
+- 同一个头**换个大小写写两遍会报错**（`{"X-A":"1","x-a":"2"}`）。头名既然大小写不敏感，这就是笔误而不是合并，替你猜一个值比直接报错更糟。
+- **写错就报错退出，绝不静默忽略。** JSON 非法、头名不合法（必须是 RFC
+  9110 的 field-name）、值不是字符串/数字/布尔，都会在启动阶段直接给出原因。配在这里的通常是凭据，静默丢弃只会把一条清晰的配置错误变成端点返回的莫名 401。
+- 值必须能表示成**单字节 Latin-1**。C0 控制字符（`\t` 除外）与 DEL 一律拒绝：CR
+  / LF 是头注入（header
+  injection）向量，一个换行就能凭空插入一个攻击者指定的头。**码点大于 U+00FF 的字符同样拒绝**——HTTP 头值本质是字节，`fetch`
+  会在每一个请求上抛出一个既不说头名也不说变量名的
+  `TypeError`，不如在启动时就说清楚。中文等非拉丁字符请先编码（例如百分号编码的 UTF-8）。
+- 与程序化传入的 `config.customHeaders` 同时存在时，**环境变量优先**。
 
 ### `export` 与 `.env` 的优先级
 
@@ -61,10 +95,17 @@ export GEMINI_OPENAI_MODELID="qwen2.5-coder:14b"
    `GEMINI_CLI_TRUST_WORKSPACE=true`，或直接用 `export`。
 3. **不受信任工作区中的项目级 `.env` 会被白名单过滤。** `AUTH_ENV_VAR_WHITELIST`
    当前只放行 `GEMINI_API_KEY`、`GOOGLE_API_KEY`、`GOOGLE_CLOUD_PROJECT`、
-   `GOOGLE_CLOUD_LOCATION`，因此上表四个变量写在工作区 `.env`
+   `GOOGLE_CLOUD_LOCATION`，因此上表五个变量写在工作区 `.env`
    里会被静默丢弃。改动该白名单涉及安全边界，需谨慎评估。
 
 > 最稳妥的做法是 `export` 或写 `~/.gemini/.env`，两者都不受白名单限制。
+
+> [!NOTE] 上述白名单与启动校验都属于 **CLI 侧**。`packages/a2a-server` 另行组装
+> `Config.env`（`a2a-server/src/config/config.ts`），既不走
+> `AUTH_ENV_VAR_WHITELIST`，也不调用
+> `validateAuthMethod`。因此同一组变量在 a2a-server 下的行为与 CLI 并不一致：配置写错不会在启动时报错，而是等到构造
+> `OpenAIContentGenerator`
+> 时才抛出来。用 a2a-server 跑 OpenAI 模式时请自行确认环境变量正确。
 
 ### 认证类型优先级
 
@@ -102,20 +143,22 @@ geminiChat / baseLlmClient / contextManager / summarizer
 
 ### 模块结构
 
-| 文件                        |     行数 | 职责                                                       |
-| :-------------------------- | -------: | :--------------------------------------------------------- |
-| `constants.ts`              |       36 | 环境变量名与 `readEnvValue`。**零 import**，避免循环依赖。 |
-| `types.ts`                  |      148 | OpenAI 协议的最小类型集，不引入第三方 SDK。                |
-| `converters.ts`             |      657 | Gemini ⇄ OpenAI 双向转换（纯函数，可无网络测试）。         |
-| `openaiClient.ts`           |      438 | 原生 `fetch` + 手写 SSE 解析、代理与超时策略、压缩体解码。 |
-| `openaiContentGenerator.ts` |      298 | `ContentGenerator` 实现与流式响应重组。                    |
-| `index.ts`                  |       19 | 对外导出。                                                 |
-| 合计                        | **1596** | 另有 1373 行测试。                                         |
+| 文件                        |     行数 | 职责                                                                         |
+| :-------------------------- | -------: | :--------------------------------------------------------------------------- |
+| `constants.ts`              |      142 | 环境变量名、`readEnvValue`、`parseHeaderJson`。**零 import**，避免循环依赖。 |
+| `types.ts`                  |      148 | OpenAI 协议的最小类型集，不引入第三方 SDK。                                  |
+| `converters.ts`             |      657 | Gemini ⇄ OpenAI 双向转换（纯函数，可无网络测试）。                           |
+| `openaiClient.ts`           |      452 | 原生 `fetch` + 手写 SSE 解析、代理与超时策略、压缩体解码。                   |
+| `openaiContentGenerator.ts` |      308 | `ContentGenerator` 实现与流式响应重组。                                      |
+| `index.ts`                  |       19 | 对外导出。                                                                   |
+| 合计                        | **1726** | 另有 1653 行测试。                                                           |
 
 ### 注入点
 
-对新代码之外的改动共 21 个文件：生产代码 13 个文件（+192 /
-−21），测试 8 个文件（+352）。全部是定点注入：
+对新代码之外的改动共 21 个文件：生产代码 13 个文件（+200 /
+−22），测试 8 个文件（+352
+−3），另有 1 个生成物与 2 篇文档。全部是定点注入；**逐函数、逐行的修改点清单见
+[与上游合并升级指南](#与上游合并升级指南)**，下表只作索引：
 
 | 文件                                       | 改动                                                                             |
 | :----------------------------------------- | :------------------------------------------------------------------------------- |
@@ -124,7 +167,7 @@ geminiChat / baseLlmClient / contextManager / summarizer
 | `core/src/fallback/handler.ts`             | OpenAI 模式下禁用 Gemini 回退链                                                  |
 | `core/src/core/loggingContentGenerator.ts` | 遥测上报真实端点而非 Gemini 默认端点                                             |
 | `core/src/index.ts`                        | 导出新模块                                                                       |
-| `cli/src/config/auth.ts`                   | 校验 `BASE_URL` 与 `MODELID`（API key 可空）                                     |
+| `cli/src/config/auth.ts`                   | 校验 `BASE_URL` 与 `MODELID` 必填、`HEADERS` 可解析（API key 可空）              |
 | `cli/src/config/settingsSchema.ts`         | `security.auth.*` 的合法取值描述（文档由它生成）                                 |
 | `cli/src/validateNonInterActiveAuth.ts`    | 认证类型解析                                                                     |
 | `cli/src/core/initializer.ts`              | 启动鉴权与是否弹出认证对话框                                                     |
@@ -256,6 +299,8 @@ OpenAI 流量在遥测中上报端点真实 host，不会像默认分支那样�
 | 本地服务连接失败，返回代理的错误页                     | 端点不是回环地址却在走代理；`config.proxy` 取自 `HTTPS_PROXY` 等变量。确认地址是 `localhost` / `127.0.0.1` / `::1`，或设置 `NO_PROXY`。                      |
 | 启动时卡住不动                                         | `createContentGeneratorConfig` 的 OpenAI 分支已提前返回，不会触碰 keychain。若仍卡住，检查是否走了其它认证类型（Linux 无 Secret Service 时 keytar 会阻塞）。 |
 | 工具调用在历史里重复                                   | 属于契约 2 被破坏。端点是否在多个 chunk 里重复发送了同一个 `tool_calls`？                                                                                    |
+| `GEMINI_OPENAI_HEADERS must be valid JSON`             | 多半是 shell 引号问题。JSON 要整体用**单引号**包住：`export GEMINI_OPENAI_HEADERS='{"X-A":"1"}'`。用双引号时 shell 会吃掉内层 `"`，解析必然失败。            |
+| 自定义 header 没发出去                                 | 确认变量名拼写，并检查是否写在工作区项目 `.env` 里（会被白名单过滤，见[环境变量](#环境变量)）。                                                              |
 
 ### 403：模型侧的「Agent 框架」门禁
 
@@ -276,6 +321,10 @@ OpenAI 流量在遥测中上报端点真实 host，不会像默认分支那样�
 - Gemini
   CLI 不在该目录中，因此使用本模型只有两条路：换模型，或伪造其它应用的标识—— 后者是对厂商访问控制的规避，也会误导 OpenRouter 的流量归属，本适配器不提供该能力，也不建议采用。
 
+> 注：`GEMINI_OPENAI_HEADERS` 是通用的请求头配置，理论上可以拿它去设置
+> `HTTP-Referer` /
+> `User-Agent`。用它来**冒充白名单内的应用、绕过上述门禁**，性质仍然是规避厂商的访问控制，本适配器不为这种做法背书；该变量的定位是让端点能表达自己的鉴权与租户要求。
+
 **推荐做法是换一个没有门禁的免费模型。** 例如
 `nvidia/nemotron-3-ultra-550b-a55b:free`
 （1M 上下文、支持工具调用），本适配器已对其做过完整的端到端验证。
@@ -285,7 +334,7 @@ OpenAI 流量在遥测中上报端点真实 host，不会像默认分支那样�
 ## 开发与测试
 
 ```bash
-# 模块单测（90 项，无网络依赖）
+# 模块单测（116 项，无网络依赖）
 npx vitest run --root packages/core src/core/openai
 
 # 认证相关
@@ -328,7 +377,7 @@ http.createServer((req,res)=>{
 
 ### 已完成的验证
 
-- 模块单测 92 项全过
+- 模块单测 116 项全过
 - core 全量 8144 项通过；5 个失败经 `git stash`
   在干净树对照确认为预先存在（`mock-fs` 与 Node 26 不兼容、PTY
   fd、`update_topic` 策略、model golden）
@@ -342,21 +391,206 @@ http.createServer((req,res)=>{
 
 ---
 
-## 与上游同步的策略
+## 与上游合并升级指南
 
-本功能刻意保持"可摘除"：
+本功能刻意保持"可摘除"：协议翻译全部在新目录内，不修改任何调用方（`geminiChat`、`client.ts`、工具系统零改动）；使用原生
+`fetch` + 手写 SSE，**不新增运行时依赖**；对既有文件的改动都是定点注入——要么以
+`authType === AuthType.USE_OPENAI` 或 `GEMINI_API_TYPE=openai`
+开关为条件，要么是纯新增（`index.ts` 的 re-export、`settingsSchema.ts`
+的文案）。
 
-- 协议翻译全部在新目录内，不修改任何调用方（`geminiChat`、`client.ts`、工具系统零改动）。
-- 原生 `fetch` + 手写 SSE，**不新增运行时依赖**，避免与上游的依赖策略冲突。
-- 对既有文件的改动都是小的条件分支，且绝大多数以
-  `authType === AuthType.USE_OPENAI` 为条件。
+### 变更性质总览
 
-同步上游时，冲突应集中在 `packages/core/src/core/contentGenerator.ts`
-的枚举与工厂分支，以及 `packages/cli/src/ui/auth/AuthDialog.tsx` 的菜单列表。
+| 类别                             |                           数量 | 合并时的处理                     |
+| :------------------------------- | -----------------------------: | :------------------------------- |
+| 新增目录 `core/src/core/openai/` |   6 源文件 + 4 测试（3379 行） | 上游没有，**不会冲突**，原样保留 |
+| 新增文档 `README_OPENAI.md`      |                              1 | 同上                             |
+| 修改上游生产代码                 |          13 个文件（+200 −22） | 逐个核对，见下节                 |
+| 修改上游测试代码                 |            8 个文件（+352 −3） | 与对应生产改动配对               |
+| 重新生成的产物                   | `schemas/settings.schema.json` | **不要手改**，用脚本重生成       |
 
-### 相关文档
+> **新建 `openai/*.test.ts` 时必须 `git add -f`。** 本机全局 gitignore 里有一条
+> `*Test.*`：名字里含 `test.` 的路径一律忽略，大小写不敏感，覆盖面远大于
+> `*.test.ts`（`contest.md`、`Latest.md`
+> 同样中招——新建这类文件时留意）。指定路径 `git add <path>` 会报错退出（exit
+> 1，有提示），`git add .` / `git add -A` 则静默跳过（exit
+> 0），两种都进不了索引。文件在盘上、`vitest`
+> 也照跑，但不在任何提交里，`format-patch` / `git am` 迁移时**静默丢失**。
+>
+> 该目录下现有 4 个测试文件（`converters` / `openaiClient` /
+> `openaiContentGenerator` / `constants`）已全部入库——前 3 个随 `023934a1d`，
+> `constants.test.ts` 随 `openai自定义请求头` 那个提交（`git log`
+> 最新一条）。后续新增同目录测试沿用同样做法。
 
-`docs/get-started/authentication.mdx` 与 `docs/reference/configuration.md`
-中已有面向用户的英文说明（随本功能一并加入）。其中 `configuration.md` 的
-`security.auth.*` 条目由 `settingsSchema.ts` 自动生成，修改描述后需运行
-`npm run docs:settings`。
+### 逐文件修改点
+
+下面的"改动方式"决定了冲突难度：
+
+- **纯插入** —— 只在既有代码之间新增行；上游没动同一处就不会冲突。
+- **改既有行**
+  —— 修改了上游原有的语句或注释，**上游一旦改同一行就会冲突**。合并时优先保留上游版本，再把 OpenAI 分支重新贴上。
+
+#### `packages/core/src/core/contentGenerator.ts`（+90 −4，冲突高危）
+
+| 位置                                                                      | 改动方式 | 内容                                                                                                                                                                                                                                           |
+| :------------------------------------------------------------------------ | :------- | :--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 顶部 import                                                               | 纯插入   | `./openai/openaiContentGenerator.js`、`./openai/constants.js`                                                                                                                                                                                  |
+| `enum AuthType`                                                           | 纯插入   | 新增成员 `USE_OPENAI = 'openai'`                                                                                                                                                                                                               |
+| `getAuthTypeFromEnv()`                                                    | 改既有行 | 函数体**最前面**插入 `GEMINI_API_TYPE === 'openai'` 判断，并同步改了上方 JSDoc 的编号列表。顺序必须在 `GOOGLE_GENAI_USE_GCA`、`GEMINI_API_KEY` 之前，否则带着 `GEMINI_API_KEY` 的机器会被抢走后端                                              |
+| `isOpenAiApiTypeSwitch()` / `resolveAuthType()` / `getExplicitAuthType()` | 纯插入   | 三个新导出函数，整块插在 `getAuthTypeFromEnv()` 与 `ContentGeneratorConfig` 类型之间                                                                                                                                                           |
+| `createContentGeneratorConfig()`                                          | 改既有行 | ① 提前返回的 `if` 加了 `\|\| authType === AuthType.USE_OPENAI`；② 分支内填充 `apiKey` / `baseUrl`、置 `vertexai = false`。**这个提前返回是刻意的**：OpenAI 模式绝不能走到下面读 keychain 的 `loadApiKey()`（Linux 无 Secret Service 时会卡死） |
+| `createContentGenerator()`                                                | 纯插入   | 在 `fakeResponses` 分支之后、`resolveModel()` 之前插入 `USE_OPENAI` 分支，直接构造 `LoggingContentGenerator(new OpenAIContentGenerator(...))`                                                                                                  |
+
+#### `packages/core/src/config/config.ts`（+13）
+
+| 位置            | 改动方式 | 内容                                                                                                                                                                                                             |
+| :-------------- | :------- | :--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 顶部 import     | 纯插入   | `OPENAI_MODEL_ID_ENV`、`readEnvValue`                                                                                                                                                                            |
+| `refreshAuth()` | 纯插入   | 在 `this.contentGeneratorConfig = newContentGeneratorConfig;` 之后，当 `authMethod === AuthType.USE_OPENAI` 时用 `GEMINI_OPENAI_MODELID` 调 `setModel()`（`isTemporary` 方式，不覆盖用户保存的 Gemini 模型设置） |
+
+#### `packages/core/src/core/loggingContentGenerator.ts`（+21 −3）
+
+| 位置            | 改动方式 | 内容                                                                                                                                                          |
+| :-------------- | :------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| import          | 改既有行 | `import type { ContentGenerator }` → `import { AuthType, type ContentGenerator }`                                                                             |
+| `getEndpoint()` | 改既有行 | 插入新的 **Case 2**（OpenAI 端点真实 host/port），原 Case 2 → Case 3、Case 3 → Case 4。**冲突点是两处既有的序号注释**（新插入的 Case 2 那行不算），无语义影响 |
+
+#### `packages/core/src/fallback/handler.ts`（+8）
+
+| 位置               | 改动方式 | 内容                                                                    |
+| :----------------- | :------- | :---------------------------------------------------------------------- |
+| import             | 纯插入   | `AuthType`                                                              |
+| `handleFallback()` | 纯插入   | 函数体开头：OpenAI 模式下直接 `return null`（回退链上全是 Gemini 模型） |
+
+#### `packages/core/src/index.ts`（+1）
+
+| 位置        | 改动方式 | 内容                                      |
+| :---------- | :------- | :---------------------------------------- |
+| export 列表 | 纯插入   | `export * from './core/openai/index.js';` |
+
+#### `packages/cli/src/` 下的 7 处改动
+
+| 文件                            | 改动方式 | 内容                                                                                                                                                                                                                                                                |
+| :------------------------------ | :------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `config/auth.ts`                | 纯插入   | `validateAuthMethod()` 的 `USE_VERTEX_AI` 分支之后、末尾 `return 'Invalid auth method selected.'` 之前插入 `USE_OPENAI` 分支：校验 `GEMINI_OPENAI_BASE_URL` 与 `GEMINI_OPENAI_MODELID` 必填、`GEMINI_OPENAI_HEADERS` 可解析，**不校验 API key**（本地服务可无鉴权） |
+| `validateNonInterActiveAuth.ts` | 改既有行 | import 换成 `resolveAuthType`；`configuredAuthType \|\| getAuthTypeFromEnv()` → `resolveAuthType(configuredAuthType)`；错误提示串末尾补 `GEMINI_API_TYPE`                                                                                                           |
+| `core/initializer.ts`           | 改既有行 | `selectedType` → `getExplicitAuthType(selectedType)` 后再传给 `performInitialAuth`；`shouldOpenAuthDialog` 一并改用解析后的值                                                                                                                                       |
+| `ui/auth/useAuth.ts`            | 改既有行 | 交互模式取 `authType` 处改为 `getExplicitAuthType(...)`                                                                                                                                                                                                             |
+| `ui/auth/AuthDialog.tsx`        | 改既有行 | `items` 数组末尾新增 `OpenAI API (compatible)` 选项；`initialAuthIndex` 的 `selectedType` 判断改为 `getExplicitAuthType(...)`                                                                                                                                       |
+| `gemini.tsx`                    | 改既有行 | `--list-sessions` 的尽力鉴权处包一层 `getExplicitAuthType(...)`                                                                                                                                                                                                     |
+| `acp/acpSessionManager.ts`      | 改既有行 | 两处 `auth.selectedType \|\|` 包一层 `getExplicitAuthType(...)`                                                                                                                                                                                                     |
+
+这 7 处共用一个语义：**"用户是否显式选择了认证方式"的判定统一收敛到
+`getExplicitAuthType()`** —— `GEMINI_API_TYPE=openai` 算显式选择，环境里漂着的
+`GEMINI_API_KEY` 不算。上游若在这条路径上新增了取值点，按同一规则补一层即可。
+
+#### `settingsSchema.ts` 与 `settings.schema.json`
+
+| 位置                               | 改动方式 | 内容                                                                              |
+| :--------------------------------- | :------- | :-------------------------------------------------------------------------------- |
+| `cli/src/config/settingsSchema.ts` | 改既有行 | `security.auth.selectedType` / `enforcedType` 两条 description 文案，列出合法取值 |
+| `schemas/settings.schema.json`     | 生成物   | 由 `npm run schema:settings` 从上一条生成                                         |
+
+`schema.json`
+是生成产物而非手写文件：合并后重跑一次脚本即可，**不要手工解冲突**。
+
+#### 文档
+
+`docs/get-started/authentication.mdx`（+103 −1）新增
+`## Use an OpenAI-compatible API` 小节；`docs/reference/configuration.md`（+33
+−2）为其引用与 `security.auth.*` 条目，同样由 `npm run docs:settings` 生成。
+
+#### 测试文件（8 个，+352 −3）
+
+| 文件                                                     | 覆盖内容                                                                                                                                                        |
+| :------------------------------------------------------- | :-------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `core/src/core/contentGenerator.test.ts`                 | 3 个新 describe：`resolveAuthType` / `getExplicitAuthType` / `isOpenAiApiTypeSwitch`；已有的 `getAuthTypeFromEnv` describe 增加 3 个用例；另有 3 个工厂行为用例 |
+| `core/src/core/loggingContentGenerator.test.ts`          | OpenAI 模式下的端点上报                                                                                                                                         |
+| `core/src/fallback/handler.test.ts`                      | OpenAI 模式下回退链被禁用                                                                                                                                       |
+| `cli/src/core/initializer.test.ts`                       | 开关驱动启动鉴权与是否弹对话框                                                                                                                                  |
+| `cli/src/ui/auth/useAuth.test.tsx`                       | 开关驱动自动认证                                                                                                                                                |
+| `cli/src/ui/auth/AuthDialog.test.tsx`                    | 已有 `Initial Auth Type Selection` describe 增加 2 条 `it.each` 行：开关驱动默认选中项（菜单项本身由下一行的快照覆盖）                                          |
+| `cli/src/ui/auth/__snapshots__/AuthDialog.test.tsx.snap` | 快照多出 OpenAI 选项，**冲突时用 `-u` 重生成**                                                                                                                  |
+| `cli/src/validateNonInterActiveAuth.test.ts`             | 无头模式下开关生效                                                                                                                                              |
+
+> 本表只列**被修改的上游测试**。`core/src/core/openai/`
+> 下的 4 个测试文件（`converters` / `openaiClient` / `openaiContentGenerator` /
+> `constants`）是新增文件，计入上文「新增目录」。
+
+### 合并流程
+
+```bash
+# 一次性配置：上游是 google-gemini/gemini-cli，origin 指向你自己的 fork
+git remote add upstream https://github.com/google-gemini/gemini-cli.git
+
+git fetch upstream
+git checkout new-version-openai
+git merge upstream/main          # 或 git rebase upstream/main
+```
+
+本功能的改动都落在三个提交里（`023934a1d 适配openai`、`3f333a255 openai-gzip自解压`、`openai自定义请求头`；最后一条按标题在
+`git log`
+里找——它一旦被改写哈希就会变，故不在此处写死），因此也可以用"重新贴一遍"的方式绕开纠缠型冲突：
+
+```bash
+git format-patch 87de0b636..HEAD -o /tmp/openai-patch
+git checkout -b new-version-openai-rebased upstream/main
+git am /tmp/openai-patch         # 逐个解决冲突后 git am --continue
+```
+
+### 冲突高危点（按上游改动频率排序）
+
+1. **`contentGenerator.ts` 的 `createContentGeneratorConfig()`** —— 提前返回的
+   `if` 条件被改过。保留上游新增的认证类型，把
+   `|| authType === AuthType.USE_OPENAI`
+   重新贴上，并确认 OpenAI 分支仍在读 keychain **之前**返回。
+2. **`contentGenerator.ts` 的 `getAuthTypeFromEnv()`**
+   —— 上游常在这里加新的探测变量。`GEMINI_API_TYPE`
+   必须保持在函数**最前面**：它是显式开关，优先级高于一切环境探测。
+3. **`AuthDialog.tsx` 的 `items` 数组与对应快照**
+   —— 上游增删认证选项时必冲突。加回 OpenAI 选项后运行
+   `npx vitest run packages/cli/src/ui/auth/AuthDialog.test.tsx -u` 重生成快照。
+4. **`initializer.ts` / `useAuth.ts` / `validateNonInterActiveAuth.ts`**
+   —— 三处认证类型解析语义相同，统一用 `getExplicitAuthType()` /
+   `resolveAuthType()`。
+5. **`settingsSchema.ts` 的 description 与 `settings.schema.json`**
+   —— 改完文案重跑 `npm run schema:settings`。
+6. **`openaiClient.ts` 的响应重试路径** —— 上游若调整 `retryWithBackoff`
+   或 HTTP 层的错误分类，需确认契约 3（工具调用急切发起）仍然成立，否则 429/5xx 会绕过重试。
+
+### 合并后验证
+
+```bash
+npm run build                     # 类型检查
+npm run lint
+npm run schema:settings           # 确认 schema 无意外 diff
+
+# 本功能相关测试
+npx vitest run \
+  packages/core/src/core/openai \
+  packages/core/src/core/contentGenerator.test.ts \
+  packages/core/src/core/loggingContentGenerator.test.ts \
+  packages/core/src/fallback/handler.test.ts \
+  packages/cli/src/core/initializer.test.ts \
+  packages/cli/src/validateNonInterActiveAuth.test.ts \
+  packages/cli/src/ui/auth
+```
+
+最后跑一次真实端点冒烟 —— **单测全绿不等于请求真的打通**：
+
+```bash
+export GEMINI_API_TYPE=openai
+export GEMINI_OPENAI_BASE_URL="https://openrouter.ai/api/v1"
+export GEMINI_OPENAI_API_KEY="sk-or-..."
+export GEMINI_OPENAI_MODELID="<一个不受门禁限制的模型>"
+npm start -- -p "Say hello"
+```
+
+### 摘除本功能
+
+若上游将来原生支持了 OpenAI 端点，`git revert 3f333a255 023934a1d` 加上
+`openai自定义请求头` 那条即可：新增目录、新文档与 `settings.schema.json`
+的改动随之删除，无需清理散落的补丁。该前提（`openai/*.test.ts`
+已进入提交，见上文 `git add -f` 说明）现已满足——`git revert`
+只回滚已跟踪的文件，被 gitignore 挡住的孤立测试文件会留在盘上，且 import 的是已被删除的模块，`vitest`
+会直接报错。

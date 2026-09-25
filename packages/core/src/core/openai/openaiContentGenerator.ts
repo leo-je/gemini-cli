@@ -48,7 +48,12 @@ import {
   toOpenAIRequest,
 } from './converters.js';
 import type { OpenAIChatCompletion, OpenAIResponseToolCall } from './types.js';
-import { OPENAI_MODEL_ID_ENV, readEnvValue } from './constants.js';
+import {
+  OPENAI_HEADERS_ENV,
+  OPENAI_MODEL_ID_ENV,
+  parseHeaderJson,
+  readEnvValue,
+} from './constants.js';
 
 /** A partially accumulated `tool_calls` entry spread across stream deltas. */
 interface PartialToolCall {
@@ -63,11 +68,16 @@ export class OpenAIContentGenerator implements ContentGenerator {
 
   constructor(config: ContentGeneratorConfig, gcConfig: Config) {
     this.configuredModelId = readEnvValue(OPENAI_MODEL_ID_ENV, gcConfig.env);
+    // `GEMINI_OPENAI_HEADERS` is merged over `config.customHeaders`, so the
+    // user's explicit environment setting beats any programmatic default.
+    const configuredHeaders = parseHeaderJson(
+      readEnvValue(OPENAI_HEADERS_ENV, gcConfig.env),
+    );
     this.client = new OpenAICompatibleClient({
       baseUrl: config.baseUrl ?? '',
       apiKey: config.apiKey ?? '',
       proxy: config.proxy,
-      headers: config.customHeaders,
+      headers: { ...config.customHeaders, ...configuredHeaders },
     });
   }
 
