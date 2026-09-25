@@ -21,6 +21,7 @@
  * escape the CLI's retry layer entirely.
  */
 
+import { gunzipSync, inflateSync } from 'node:zlib';
 import type * as undici from 'undici';
 import { createSafeProxyAgent, isLoopbackHost } from '../../utils/fetch.js';
 import { debugLogger } from '../../utils/debugLogger.js';
@@ -112,10 +113,48 @@ function buildBoundedSignal(
   return { signal: controller.signal, clear: () => clearTimeout(timer) };
 }
 
+/**
+ * Decodes a body that arrived compressed despite carrying no usable
+ * `Content-Encoding` header.
+ *
+ * `fetch` normally decompresses responses for us, but that depends on the
+ * header surviving the trip. Behind a proxy dispatcher it can be dropped, and a
+ * Cloudflare-fronted error then surfaces as raw gzip bytes — turning a readable
+ * "403: this model is unavailable" into mojibake that hides the real cause. The
+ * magic-byte check recovers the original text; anything unrecognized is
+ * returned untouched, so genuine binary payloads are never mangled.
+ */
+function decodeCompressedBody(bytes: Buffer): Buffer {
+  if (bytes[0] === 0x1f && bytes[1] === 0x8b) {
+    try {
+      return gunzipSync(bytes);
+    } catch {
+      return bytes;
+    }
+  }
+  // 0x78 is the zlib CMF byte for a 32K window; the second byte is the check.
+  if (bytes[0] === 0x78 && [0x01, 0x9c, 0xda].includes(bytes[1] ?? -1)) {
+    try {
+      return inflateSync(bytes);
+    } catch {
+      return bytes;
+    }
+  }
+  return bytes;
+}
+
+/**
+ * Reads a response body as text, tolerating an undecoded compressed payload.
+ */
+async function readResponseText(response: Response): Promise<string> {
+  const bytes = Buffer.from(await response.arrayBuffer());
+  return decodeCompressedBody(bytes).toString('utf8');
+}
+
 async function toHttpError(response: Response): Promise<OpenAIHttpError> {
   let detail = '';
   try {
-    const text = await response.text();
+    const text = await readResponseText(response);
     if (text) {
       try {
         const parsed: unknown = JSON.parse(text);
@@ -245,7 +284,7 @@ export class OpenAICompatibleClient {
   }
 
   private async readJson(response: Response): Promise<unknown> {
-    const text = await response.text();
+    const text = await readResponseText(response);
     try {
       return JSON.parse(text);
     } catch {
