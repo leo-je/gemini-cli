@@ -10,6 +10,9 @@ import {
   AuthType,
   createContentGeneratorConfig,
   getAuthTypeFromEnv,
+  getExplicitAuthType,
+  isOpenAiApiTypeSwitch,
+  resolveAuthType,
   type ContentGenerator,
 } from './contentGenerator.js';
 import { createCodeAssistContentGenerator } from '../code_assist/codeAssist.js';
@@ -85,6 +88,102 @@ describe('getAuthTypeFromEnv', () => {
   it('should return undefined when no matching env variables are set', () => {
     expect(getAuthTypeFromEnv()).toBeUndefined();
   });
+
+  it('should detect USE_OPENAI when GEMINI_API_TYPE is openai', () => {
+    vi.stubEnv('GEMINI_API_TYPE', 'openai');
+    expect(getAuthTypeFromEnv()).toBe(AuthType.USE_OPENAI);
+  });
+
+  it('should prefer USE_OPENAI over an ambient GEMINI_API_KEY', () => {
+    // GEMINI_API_TYPE is an explicit switch, so a machine that also carries a
+    // Gemini key should still reach the endpoint the user asked for.
+    vi.stubEnv('GEMINI_API_TYPE', 'openai');
+    vi.stubEnv('GEMINI_API_KEY', 'fake-key');
+    expect(getAuthTypeFromEnv()).toBe(AuthType.USE_OPENAI);
+  });
+
+  it('should ignore other GEMINI_API_TYPE values', () => {
+    vi.stubEnv('GEMINI_API_TYPE', 'gemini');
+    vi.stubEnv('GEMINI_API_KEY', 'fake-key');
+    expect(getAuthTypeFromEnv()).toBe(AuthType.USE_GEMINI);
+  });
+});
+
+describe('resolveAuthType', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it('prefers the persisted selection by default', () => {
+    vi.stubEnv('GEMINI_API_KEY', 'fake-key');
+    expect(resolveAuthType(AuthType.USE_VERTEX_AI)).toBe(
+      AuthType.USE_VERTEX_AI,
+    );
+  });
+
+  it('falls back to environment detection when nothing is selected', () => {
+    vi.stubEnv('GEMINI_API_KEY', 'fake-key');
+    expect(resolveAuthType(undefined)).toBe(AuthType.USE_GEMINI);
+  });
+
+  it('lets the OpenAI switch outrank a persisted selection', () => {
+    vi.stubEnv('GEMINI_API_TYPE', 'openai');
+    expect(resolveAuthType(AuthType.USE_VERTEX_AI)).toBe(AuthType.USE_OPENAI);
+  });
+
+  it('resolves to the OpenAI switch when nothing is selected', () => {
+    vi.stubEnv('GEMINI_API_TYPE', 'openai');
+    expect(resolveAuthType(undefined)).toBe(AuthType.USE_OPENAI);
+  });
+});
+
+describe('getExplicitAuthType', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it('returns the persisted selection', () => {
+    expect(getExplicitAuthType(AuthType.USE_VERTEX_AI)).toBe(
+      AuthType.USE_VERTEX_AI,
+    );
+  });
+
+  it('returns undefined for an unstated preference', () => {
+    // An ambient API key preselects a dialog option; it is not a choice.
+    vi.stubEnv('GEMINI_API_KEY', 'fake-key');
+    expect(getExplicitAuthType(undefined)).toBeUndefined();
+  });
+
+  it('treats the OpenAI switch as an explicit choice', () => {
+    vi.stubEnv('GEMINI_API_TYPE', 'openai');
+    expect(getExplicitAuthType(undefined)).toBe(AuthType.USE_OPENAI);
+  });
+
+  it('lets the OpenAI switch outrank a persisted selection', () => {
+    vi.stubEnv('GEMINI_API_TYPE', 'openai');
+    expect(getExplicitAuthType(AuthType.USE_VERTEX_AI)).toBe(
+      AuthType.USE_OPENAI,
+    );
+  });
+});
+
+describe('isOpenAiApiTypeSwitch', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it('is true only for the exact "openai" value', () => {
+    vi.stubEnv('GEMINI_API_TYPE', 'openai');
+    expect(isOpenAiApiTypeSwitch()).toBe(true);
+  });
+
+  it.each(['OpenAI', 'open_ai', 'openai ', 'gemini'])(
+    'is false for %s',
+    (value) => {
+      vi.stubEnv('GEMINI_API_TYPE', value);
+      expect(isOpenAiApiTypeSwitch()).toBe(false);
+    },
+  );
 });
 
 describe('createContentGenerator', () => {
@@ -97,6 +196,27 @@ describe('createContentGenerator', () => {
 
   afterEach(() => {
     vi.unstubAllEnvs();
+  });
+
+  it('should create an OpenAI-compatible generator without touching the Google SDK', async () => {
+    vi.stubEnv('GEMINI_OPENAI_MODELID', 'gpt-4o');
+    const openaiConfig = {
+      getClientName: vi.fn().mockReturnValue(undefined),
+      env: {},
+    } as unknown as Config;
+
+    const generator = await createContentGenerator(
+      {
+        authType: AuthType.USE_OPENAI,
+        apiKey: 'openai-key',
+        baseUrl: 'https://openai.example.com/v1',
+      },
+      openaiConfig,
+    );
+
+    expect(generator).toBeInstanceOf(LoggingContentGenerator);
+    expect(vi.mocked(GoogleGenAI)).not.toHaveBeenCalled();
+    expect(vi.mocked(createCodeAssistContentGenerator)).not.toHaveBeenCalled();
   });
 
   it('should create a FakeContentGenerator', async () => {
@@ -1433,6 +1553,38 @@ describe('createContentGeneratorConfig', () => {
     );
     expect(config.apiKey).toBe('env-gemini-key');
     expect(config.vertexai).toBe(false);
+  });
+
+  it('should configure for OpenAI from its own environment variables', async () => {
+    vi.stubEnv('GEMINI_API_KEY', 'ambient-gemini-key');
+    vi.stubEnv('GEMINI_OPENAI_API_KEY', 'openai-key');
+    vi.stubEnv('GEMINI_OPENAI_BASE_URL', 'https://openai.example.com/v1');
+
+    const config = await createContentGeneratorConfig(
+      mockConfig,
+      AuthType.USE_OPENAI,
+    );
+
+    expect(config.apiKey).toBe('openai-key');
+    expect(config.baseUrl).toBe('https://openai.example.com/v1');
+    expect(config.vertexai).toBe(false);
+    // The Gemini keychain must not be consulted: on Linux without a Secret
+    // Service, keytar can block indefinitely on its functional probe.
+    expect(loadApiKey).not.toHaveBeenCalled();
+  });
+
+  it('should allow an empty OpenAI key so local endpoints work', async () => {
+    vi.stubEnv('GEMINI_OPENAI_API_KEY', '');
+    vi.stubEnv('GEMINI_OPENAI_BASE_URL', 'http://localhost:11434/v1');
+
+    const config = await createContentGeneratorConfig(
+      mockConfig,
+      AuthType.USE_OPENAI,
+    );
+
+    expect(config.apiKey).toBe('');
+    expect(config.baseUrl).toBe('http://localhost:11434/v1');
+    expect(loadApiKey).not.toHaveBeenCalled();
   });
 
   it('should not configure for Gemini if GEMINI_API_KEY is empty', async () => {

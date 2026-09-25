@@ -45,5 +45,23 @@ export async function validateAuthMethod(
     return null;
   }
 
+  if (authMethod === AuthType.USE_OPENAI) {
+    if (!process.env['GEMINI_OPENAI_BASE_URL']) {
+      return (
+        'When using an OpenAI-compatible API, you must specify the GEMINI_OPENAI_BASE_URL environment variable.\n' +
+        'Update your environment and try again (no reload needed if using .env)!'
+      );
+    }
+    if (!process.env['GEMINI_OPENAI_MODELID']) {
+      return (
+        'When using an OpenAI-compatible API, you must specify the GEMINI_OPENAI_MODELID environment variable.\n' +
+        'Update your environment and try again (no reload needed if using .env)!'
+      );
+    }
+    // GEMINI_OPENAI_API_KEY is intentionally not required: local servers such as
+    // Ollama and LM Studio accept unauthenticated requests.
+    return null;
+  }
+
   return 'Invalid auth method selected.';
 }

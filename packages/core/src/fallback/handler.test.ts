@@ -76,6 +76,9 @@ const createMockConfig = (overrides: Partial<Config> = {}): Config =>
     ),
     getActiveModel: vi.fn(() => MOCK_PRO_MODEL),
     getModel: vi.fn(() => MOCK_PRO_MODEL),
+    getContentGeneratorConfig: vi.fn(() => ({
+      authType: AuthType.USE_GEMINI,
+    })),
     getUserTier: vi.fn(() => undefined),
     isInteractive: vi.fn(() => false),
     getHasAccessToPreviewModel: vi.fn(() => false),
@@ -420,6 +423,26 @@ describe('handleFallback', () => {
 
       expect(result).toBe(true);
       expect(policyConfig.activateFallbackMode).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('OpenAI-compatible auth', () => {
+    it('never falls back, because every candidate is a Gemini model', async () => {
+      const openaiConfig = createMockConfig({
+        getContentGeneratorConfig: vi.fn(() => ({
+          authType: AuthType.USE_OPENAI,
+        })),
+      });
+
+      const result = await handleFallback(
+        openaiConfig,
+        MOCK_PRO_MODEL,
+        AuthType.USE_OPENAI,
+      );
+
+      expect(result).toBeNull();
+      expect(openaiConfig.activateFallbackMode).not.toHaveBeenCalled();
+      expect(openaiConfig.setActiveModel).not.toHaveBeenCalled();
     });
   });
 });

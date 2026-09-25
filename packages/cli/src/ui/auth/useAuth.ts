@@ -13,6 +13,7 @@ import {
   debugLogger,
   isAccountSuspendedError,
   ProjectIdRequiredError,
+  getExplicitAuthType,
 } from '@google/gemini-cli-core';
 import { getErrorMessage } from '@google/gemini-cli-core';
 import { AuthState } from '../types.js';
@@ -91,7 +92,12 @@ export const useAuthCommand = (
         return;
       }
 
-      const authType = settings.merged.security.auth.selectedType;
+      // Only an explicit choice authenticates here. An ambient GEMINI_API_KEY
+      // is a reason to nudge the user toward the dialog, not to sign in for
+      // them; the GEMINI_API_TYPE switch, by contrast, is a direct instruction.
+      const authType = getExplicitAuthType(
+        settings.merged.security.auth.selectedType,
+      );
       if (!authType) {
         if (process.env['GEMINI_API_KEY']) {
           onAuthError(

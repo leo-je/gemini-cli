@@ -35,6 +35,7 @@ import type {
   EmbedContentResponse,
 } from '@google/genai';
 import type { ContentGenerator } from './contentGenerator.js';
+import { AuthType } from './contentGenerator.js';
 import {
   LoggingContentGenerator,
   estimateContextBreakdown,
@@ -169,6 +170,34 @@ describe('LoggingContentGenerator', () => {
           [GEN_AI_USAGE_INPUT_TOKENS]: 1,
           [GEN_AI_USAGE_OUTPUT_TOKENS]: 2,
         },
+      });
+    });
+
+    it('reports the OpenAI endpoint host rather than the Gemini default', async () => {
+      vi.mocked(config.getContentGeneratorConfig).mockReturnValue({
+        authType: AuthType.USE_OPENAI,
+        baseUrl: 'https://openai.example.com/v1',
+      } as never);
+
+      const req = {
+        contents: [{ role: 'user', parts: [{ text: 'hello' }] }],
+        model: 'gpt-4o',
+        config: {},
+      };
+      vi.mocked(wrapped.generateContent).mockResolvedValue({
+        candidates: [{ content: { parts: [{ text: 'hi' }] } }],
+      } as never);
+
+      await loggingContentGenerator.generateContent(
+        req,
+        'prompt-openai',
+        LlmRole.MAIN,
+      );
+
+      const event = vi.mocked(logApiRequest).mock.calls[0][1];
+      expect(event.prompt.server).toEqual({
+        address: 'openai.example.com',
+        port: 443,
       });
     });
 

@@ -8,6 +8,7 @@ import {
   IdeClient,
   IdeConnectionEvent,
   IdeConnectionType,
+  getExplicitAuthType,
   logIdeConnection,
   type Config,
   StartSessionEvent,
@@ -40,15 +41,19 @@ export async function initializeApp(
   settings: LoadedSettings,
 ): Promise<InitializationResult> {
   const authHandle = startupProfiler.start('authenticate');
+  const explicitAuthType = settings.merged.security.auth.selectedType;
+  // GEMINI_API_TYPE=openai is an explicit choice, so it authenticates without a
+  // persisted selection. An ambient GEMINI_API_KEY deliberately does not: it
+  // only preselects the option in the auth dialog.
+  const authType = getExplicitAuthType(explicitAuthType);
   const { authError, accountSuspensionInfo } = await performInitialAuth(
     config,
-    settings.merged.security.auth.selectedType,
+    authType,
   );
   authHandle?.end();
   const themeError = validateTheme(settings);
 
-  const shouldOpenAuthDialog =
-    settings.merged.security.auth.selectedType === undefined || !!authError;
+  const shouldOpenAuthDialog = authType === undefined || !!authError;
 
   logCliConfiguration(
     config,

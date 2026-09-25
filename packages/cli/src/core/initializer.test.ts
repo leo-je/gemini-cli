@@ -4,9 +4,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { initializeApp } from './initializer.js';
 import {
+  AuthType,
   IdeClient,
   logIdeConnection,
   logCliConfiguration,
@@ -77,6 +78,53 @@ describe('initializer', () => {
       accountSuspensionInfo: null,
     });
     vi.mocked(validateTheme).mockReturnValue(null);
+  });
+
+  afterEach(() => {
+    delete process.env['GEMINI_API_TYPE'];
+  });
+
+  it('should skip the auth dialog when GEMINI_API_TYPE=openai is set', async () => {
+    process.env['GEMINI_API_TYPE'] = 'openai';
+    mockSettings.merged.security.auth.selectedType = undefined;
+
+    const result = await initializeApp(
+      mockConfig as unknown as Config,
+      mockSettings,
+    );
+
+    expect(result.shouldOpenAuthDialog).toBe(false);
+    expect(performInitialAuth).toHaveBeenCalledWith(
+      mockConfig,
+      AuthType.USE_OPENAI,
+    );
+  });
+
+  it('should prefer GEMINI_API_TYPE=openai over a persisted selection', async () => {
+    process.env['GEMINI_API_TYPE'] = 'openai';
+
+    const result = await initializeApp(
+      mockConfig as unknown as Config,
+      mockSettings,
+    );
+
+    expect(performInitialAuth).toHaveBeenCalledWith(
+      mockConfig,
+      AuthType.USE_OPENAI,
+    );
+    expect(result.shouldOpenAuthDialog).toBe(false);
+  });
+
+  it('should still open the auth dialog when nothing is selected', async () => {
+    mockSettings.merged.security.auth.selectedType = undefined;
+
+    const result = await initializeApp(
+      mockConfig as unknown as Config,
+      mockSettings,
+    );
+
+    expect(result.shouldOpenAuthDialog).toBe(true);
+    expect(performInitialAuth).toHaveBeenCalledWith(mockConfig, undefined);
   });
 
   it('should initialize correctly in non-IDE mode', async () => {

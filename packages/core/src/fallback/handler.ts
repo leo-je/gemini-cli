@@ -5,6 +5,7 @@
  */
 
 import type { Config } from '../config/config.js';
+import { AuthType } from '../core/contentGenerator.js';
 import { createSessionId } from '../utils/session.js';
 import {
   openBrowserSecurely,
@@ -29,6 +30,13 @@ export async function handleFallback(
   authType?: string,
   error?: unknown,
 ): Promise<string | boolean | null> {
+  // Every candidate in the fallback chain is a Gemini model, which an
+  // OpenAI-compatible endpoint cannot serve. Switching would trade a reported
+  // error for a confusing one, so let the original failure surface instead.
+  if (config.getContentGeneratorConfig()?.authType === AuthType.USE_OPENAI) {
+    return null;
+  }
+
   const failureKind = classifyFailureKind(error);
 
   const chain = resolvePolicyChain(config);

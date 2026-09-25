@@ -38,6 +38,7 @@ describe('useAuth', () => {
     vi.resetAllMocks();
     delete process.env['GEMINI_API_KEY'];
     delete process.env['GEMINI_DEFAULT_AUTH_TYPE'];
+    delete process.env['GEMINI_API_TYPE'];
   });
 
   afterEach(() => {
@@ -184,6 +185,23 @@ describe('useAuth', () => {
         'Existing API key detected (GEMINI_API_KEY)',
       );
       expect(result.current.authState).toBe(AuthState.Updating);
+    });
+
+    it('should authenticate without a selected type when GEMINI_API_TYPE=openai', async () => {
+      process.env['GEMINI_API_TYPE'] = 'openai';
+      mockValidateAuthMethod.mockResolvedValue(null);
+
+      const { result } = await renderHook(() =>
+        useAuthCommand(createSettings(undefined), mockConfig),
+      );
+
+      expect(mockConfig.refreshAuth).toHaveBeenCalledWith(AuthType.USE_OPENAI);
+      expect(result.current.authError).toBeNull();
+
+      await act(async () => {
+        deferredRefreshAuth.resolve();
+      });
+      expect(result.current.authState).toBe(AuthState.Authenticated);
     });
 
     it('should transition to AwaitingApiKeyInput if USE_GEMINI and no key found', async () => {

@@ -1980,7 +1980,8 @@ const SETTINGS_SCHEMA = {
             category: 'Security',
             requiresRestart: true,
             default: undefined as AuthType | undefined,
-            description: 'The currently selected authentication type.',
+            description:
+              'The currently selected authentication type. Valid values are `oauth-personal`, `gemini-api-key`, `vertex-ai`, `cloud-shell` (legacy), `compute-default-credentials`, `gateway`, and `openai`.',
             showInDialog: false,
           },
           enforcedType: {
@@ -1990,7 +1991,7 @@ const SETTINGS_SCHEMA = {
             requiresRestart: true,
             default: undefined as AuthType | undefined,
             description:
-              'The required auth type. If this does not match the selected auth type, the user will be prompted to re-authenticate.',
+              "The required auth type. If this does not match the selected auth type, the user will be prompted to re-authenticate. Accepts the same values as `security.auth.selectedType`. A user's `GEMINI_API_TYPE=openai` setting does not override an enforced type.",
             showInDialog: false,
           },
           useExternal: {

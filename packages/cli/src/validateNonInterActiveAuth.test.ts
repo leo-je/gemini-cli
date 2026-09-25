@@ -36,6 +36,7 @@ describe('validateNonInterActiveAuth', () => {
   let originalEnvGeminiApiKey: string | undefined;
   let originalEnvVertexAi: string | undefined;
   let originalEnvGcp: string | undefined;
+  let originalEnvApiType: string | undefined;
   let debugLoggerErrorSpy: ReturnType<typeof vi.spyOn>;
   let coreEventsEmitFeedbackSpy: MockInstance;
   let processExitSpy: MockInstance;
@@ -45,9 +46,11 @@ describe('validateNonInterActiveAuth', () => {
     originalEnvGeminiApiKey = process.env['GEMINI_API_KEY'];
     originalEnvVertexAi = process.env['GOOGLE_GENAI_USE_VERTEXAI'];
     originalEnvGcp = process.env['GOOGLE_GENAI_USE_GCA'];
+    originalEnvApiType = process.env['GEMINI_API_TYPE'];
     delete process.env['GEMINI_API_KEY'];
     delete process.env['GOOGLE_GENAI_USE_VERTEXAI'];
     delete process.env['GOOGLE_GENAI_USE_GCA'];
+    delete process.env['GEMINI_API_TYPE'];
     debugLoggerErrorSpy = vi
       .spyOn(debugLogger, 'error')
       .mockImplementation(() => {});
@@ -96,6 +99,11 @@ describe('validateNonInterActiveAuth', () => {
       process.env['GOOGLE_GENAI_USE_GCA'] = originalEnvGcp;
     } else {
       delete process.env['GOOGLE_GENAI_USE_GCA'];
+    }
+    if (originalEnvApiType !== undefined) {
+      process.env['GEMINI_API_TYPE'] = originalEnvApiType;
+    } else {
+      delete process.env['GEMINI_API_TYPE'];
     }
     vi.restoreAllMocks();
   });
@@ -243,6 +251,58 @@ describe('validateNonInterActiveAuth', () => {
     );
     expect(processExitSpy).not.toHaveBeenCalled();
     expect(debugLoggerErrorSpy).not.toHaveBeenCalled();
+  });
+
+  it('lets GEMINI_API_TYPE=openai override a configured auth type', async () => {
+    process.env['GEMINI_API_TYPE'] = 'openai';
+    const nonInteractiveConfig = createLocalMockConfig({});
+    const authType = await validateNonInteractiveAuth(
+      AuthType.USE_VERTEX_AI,
+      undefined,
+      nonInteractiveConfig,
+      mockSettings,
+    );
+    expect(authType).toBe(AuthType.USE_OPENAI);
+    expect(processExitSpy).not.toHaveBeenCalled();
+  });
+
+  it('resolves GEMINI_API_TYPE=openai with no configured auth type', async () => {
+    process.env['GEMINI_API_TYPE'] = 'openai';
+    const nonInteractiveConfig = createLocalMockConfig({});
+    const authType = await validateNonInteractiveAuth(
+      undefined,
+      undefined,
+      nonInteractiveConfig,
+      mockSettings,
+    );
+    expect(authType).toBe(AuthType.USE_OPENAI);
+    expect(processExitSpy).not.toHaveBeenCalled();
+  });
+
+  it('still enforces enforcedType when GEMINI_API_TYPE=openai is set', async () => {
+    // The switch is a user preference; it is not a way around an
+    // administrator's policy.
+    process.env['GEMINI_API_TYPE'] = 'openai';
+    mockSettings.merged.security.auth.enforcedType = AuthType.LOGIN_WITH_GOOGLE;
+    const nonInteractiveConfig = createLocalMockConfig({
+      getOutputFormat: vi.fn().mockReturnValue(OutputFormat.TEXT),
+    });
+    try {
+      await validateNonInteractiveAuth(
+        undefined,
+        undefined,
+        nonInteractiveConfig,
+        mockSettings,
+      );
+      expect.fail('Should have exited');
+    } catch (e) {
+      expect((e as Error).message).toContain(
+        `process.exit(${ExitCodes.FATAL_AUTHENTICATION_ERROR}) called`,
+      );
+    }
+    expect(debugLoggerErrorSpy).toHaveBeenCalledWith(
+      "The enforced authentication type is 'oauth-personal', but the current type is 'openai'. Please re-authenticate with the correct type.",
+    );
   });
 
   it('exits if validateAuthMethod returns error', async () => {

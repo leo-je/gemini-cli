@@ -2002,14 +2002,18 @@ their corresponding top-level category object in your `settings.json` file.
 
 - **`security.auth.selectedType`** (string):
 
-  - **Description:** The currently selected authentication type.
+  - **Description:** The currently selected authentication type. Valid values
+    are `oauth-personal`, `gemini-api-key`, `vertex-ai`, `cloud-shell` (legacy),
+    `compute-default-credentials`, `gateway`, and `openai`.
   - **Default:** `undefined`
   - **Requires restart:** Yes
 
 - **`security.auth.enforcedType`** (string):
 
   - **Description:** The required auth type. If this does not match the selected
-    auth type, the user will be prompted to re-authenticate.
+    auth type, the user will be prompted to re-authenticate. Accepts the same
+    values as `security.auth.selectedType`. A user's `GEMINI_API_TYPE=openai`
+    setting does not override an enforced type.
   - **Default:** `undefined`
   - **Requires restart:** Yes
 
@@ -2673,6 +2677,33 @@ the `advanced.excludedEnvVars` setting in your `settings.json` file.
   - Overrides the hardcoded default
   - Example: `export GEMINI_MODEL="gemini-3-flash-preview"` (Windows PowerShell:
     `$env:GEMINI_MODEL="gemini-3-flash-preview"`)
+- **`GEMINI_API_TYPE`**:
+  - Set to `openai` to send requests to an OpenAI-compatible endpoint instead of
+    Gemini.
+  - The value is case-sensitive and must be exactly `openai`.
+  - Overrides the authentication type saved in `security.auth.selectedType`. An
+    administrator's `security.auth.enforcedType` setting still takes precedence.
+  - For setup steps, see
+    [Use an OpenAI-compatible API](../get-started/authentication.mdx#openai).
+- **`GEMINI_OPENAI_BASE_URL`**:
+  - Base URL of the OpenAI-compatible endpoint. Required when
+    `GEMINI_API_TYPE=openai`.
+  - If the URL has no path, Gemini CLI appends `/v1`; otherwise the path is used
+    as given, so include `/v1` yourself if your endpoint needs it.
+  - Example: `export GEMINI_OPENAI_BASE_URL="https://api.example.com/v1"`
+    (Windows PowerShell:
+    `$env:GEMINI_OPENAI_BASE_URL="https://api.example.com/v1"`)
+- **`GEMINI_OPENAI_API_KEY`**:
+  - Bearer token sent in the `Authorization` header of each request to the
+    OpenAI-compatible endpoint.
+  - Optional. Omit it for endpoints that don't require authentication, which is
+    typical for local servers.
+- **`GEMINI_OPENAI_MODELID`**:
+  - Model identifier sent to the OpenAI-compatible endpoint. Required when
+    `GEMINI_API_TYPE=openai`.
+  - Takes effect in place of `--model` and `GEMINI_MODEL`.
+  - Example: `export GEMINI_OPENAI_MODELID="gpt-4o"` (Windows PowerShell:
+    `$env:GEMINI_OPENAI_MODELID="gpt-4o"`)
 - **`GEMINI_CLI_TRUST_WORKSPACE`**:
   - If set to `"true"`, trusts the current workspace for the duration of the
     session, bypassing the folder trust check.

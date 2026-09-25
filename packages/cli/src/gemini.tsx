@@ -17,6 +17,7 @@ import {
   createSessionId,
   logUserPrompt,
   AuthType,
+  getExplicitAuthType,
   UserPromptEvent,
   coreEvents,
   CoreEvent,
@@ -799,7 +800,9 @@ export async function main() {
     // Handle --list-sessions flag
     if (config.getListSessions()) {
       // Attempt auth for summary generation (gracefully skips if not configured)
-      const authType = settings.merged.security.auth.selectedType;
+      const authType = getExplicitAuthType(
+        settings.merged.security.auth.selectedType,
+      );
       if (authType) {
         try {
           await config.refreshAuth(authType);

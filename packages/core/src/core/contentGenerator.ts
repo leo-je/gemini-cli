@@ -32,6 +32,13 @@ import { getVersion, resolveModel } from '../../index.js';
 import type { LlmRole } from '../telemetry/llmRole.js';
 import { ModelMappingContentGenerator } from './modelMappingContentGenerator.js';
 import { getBackendModelMappings } from '../config/models.js';
+import { OpenAIContentGenerator } from './openai/openaiContentGenerator.js';
+import {
+  OPENAI_API_KEY_ENV,
+  OPENAI_BASE_URL_ENV,
+  GEMINI_API_TYPE_ENV,
+  OPENAI_API_TYPE,
+} from './openai/constants.js';
 
 /**
  * Interface abstracting the core functionalities for generating content and counting tokens.
@@ -67,17 +74,26 @@ export enum AuthType {
   LEGACY_CLOUD_SHELL = 'cloud-shell',
   COMPUTE_ADC = 'compute-default-credentials',
   GATEWAY = 'gateway',
+  USE_OPENAI = 'openai',
 }
 
 /**
  * Detects the best authentication type based on environment variables.
  *
  * Checks in order:
- * 1. GOOGLE_GENAI_USE_GCA=true -> LOGIN_WITH_GOOGLE
- * 2. GOOGLE_GENAI_USE_VERTEXAI=true -> USE_VERTEX_AI
- * 3. GEMINI_API_KEY -> USE_GEMINI
+ * 1. GEMINI_API_TYPE=openai -> USE_OPENAI
+ * 2. GOOGLE_GENAI_USE_GCA=true -> LOGIN_WITH_GOOGLE
+ * 3. GOOGLE_GENAI_USE_VERTEXAI=true -> USE_VERTEX_AI
+ * 4. GEMINI_API_KEY -> USE_GEMINI
+ *
+ * GEMINI_API_TYPE is checked first because it is an explicit opt-in switch: a
+ * machine that also happens to carry GEMINI_API_KEY should still reach the
+ * OpenAI-compatible endpoint the user asked for.
  */
 export function getAuthTypeFromEnv(): AuthType | undefined {
+  if (process.env[GEMINI_API_TYPE_ENV] === OPENAI_API_TYPE) {
+    return AuthType.USE_OPENAI;
+  }
   if (process.env['GOOGLE_GENAI_USE_GCA'] === 'true') {
     return AuthType.LOGIN_WITH_GOOGLE;
   }
@@ -97,6 +113,56 @@ export function getAuthTypeFromEnv(): AuthType | undefined {
     return AuthType.COMPUTE_ADC;
   }
   return undefined;
+}
+
+/**
+ * True when `GEMINI_API_TYPE=openai` has switched the CLI to the
+ * OpenAI-compatible backend.
+ *
+ * Callers use this where the distinction matters: unlike an ambient
+ * `GEMINI_API_KEY`, this switch is an explicit choice, so it authorises
+ * authenticating without a persisted selection and skipping the auth dialog.
+ */
+export function isOpenAiApiTypeSwitch(): boolean {
+  return process.env[GEMINI_API_TYPE_ENV] === OPENAI_API_TYPE;
+}
+
+/**
+ * Resolves the auth type the user actually asked for, from the persisted
+ * selection and the environment.
+ *
+ * `GEMINI_API_TYPE=openai` outranks the persisted selection. Every other
+ * environment variable is a fallback that an explicit choice in `settings.json`
+ * still overrides, but this one is a deliberate, single-purpose switch: a user
+ * who exports it has just asked for the OpenAI-compatible backend, and silently
+ * honouring a stale selection instead makes the switch look broken.
+ *
+ * An enforced auth type is deliberately not consulted here. Callers check it
+ * against the returned value, so an administrator's policy still wins.
+ */
+export function resolveAuthType(
+  configuredAuthType: AuthType | undefined,
+): AuthType | undefined {
+  // Built on `getExplicitAuthType` so the switch's precedence is defined once.
+  return getExplicitAuthType(configuredAuthType) || getAuthTypeFromEnv();
+}
+
+/**
+ * Returns the auth type, but only when the user made an explicit choice;
+ * otherwise `undefined`.
+ *
+ * Use this where "nothing was chosen" has its own meaning — showing the auth
+ * dialog, or falling through to a caller-specific default. An ambient
+ * `GEMINI_API_KEY` counts as an unstated preference rather than a choice, which
+ * is why it is excluded here even though {@link resolveAuthType} honours it.
+ */
+export function getExplicitAuthType(
+  configuredAuthType: AuthType | undefined,
+): AuthType | undefined {
+  if (isOpenAiApiTypeSwitch()) {
+    return AuthType.USE_OPENAI;
+  }
+  return configuredAuthType || undefined;
 }
 
 export type ContentGeneratorConfig = {
@@ -166,8 +232,20 @@ export async function createContentGeneratorConfig(
   // (WSL/SSH/Docker/CI) keytar can block indefinitely on its functional probe.
   if (
     authType === AuthType.LOGIN_WITH_GOOGLE ||
-    authType === AuthType.COMPUTE_ADC
+    authType === AuthType.COMPUTE_ADC ||
+    authType === AuthType.USE_OPENAI
   ) {
+    if (authType === AuthType.USE_OPENAI) {
+      // Credentials come from their own env vars; the Gemini keychain and
+      // GEMINI_API_KEY must not be consulted. An empty key is legitimate here
+      // because local servers (Ollama, LM Studio) usually accept unauthenticated
+      // requests.
+      contentGeneratorConfig.apiKey =
+        apiKey || getEnv(OPENAI_API_KEY_ENV) || '';
+      contentGeneratorConfig.baseUrl =
+        baseUrl || getEnv(OPENAI_BASE_URL_ENV) || '';
+      contentGeneratorConfig.vertexai = false;
+    }
     return contentGeneratorConfig;
   }
 
@@ -225,6 +303,14 @@ export async function createContentGenerator(
         gcConfig.fakeResponses,
       );
       return new LoggingContentGenerator(fakeGenerator, gcConfig);
+    }
+    if (config.authType === AuthType.USE_OPENAI) {
+      // Handled before `resolveModel` and before any Google-specific client
+      // setup, since none of that applies to an OpenAI-compatible endpoint.
+      return new LoggingContentGenerator(
+        new OpenAIContentGenerator(config, gcConfig),
+        gcConfig,
+      );
     }
     const version = await getVersion();
     const model = resolveModel(

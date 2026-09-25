@@ -24,7 +24,8 @@ Select the authentication method that matches your situation in the table below:
 | Organization users with a company, school, or Google Workspace account | [Sign in with Google](#login-google)                             | [Yes](#set-gcp)                                             |
 | AI Studio user with a Gemini API key                                   | [Use Gemini API Key](#gemini-api)                                | No                                                          |
 | Google Cloud Vertex AI user                                            | [Vertex AI](#vertex-ai)                                          | [Yes](#set-gcp)                                             |
-| [Headless mode](#headless)                                             | [Use Gemini API Key](#gemini-api) or<br /> [Vertex AI](#vertex-ai) | No (for Gemini API Key)<br /> [Yes](#set-gcp) (for Vertex AI) |
+| OpenAI-compatible endpoint user                                        | [Use an OpenAI-compatible API](#openai)                          | No                                                          |
+| [Headless mode](#headless)                                             | [Use Gemini API Key](#gemini-api), [Vertex AI](#vertex-ai), or [Use an OpenAI-compatible API](#openai) | No (for Gemini API Key and OpenAI-compatible API)<br /> [Yes](#set-gcp) (for Vertex AI) |
 
 ### What is my Google account type?
 
@@ -358,6 +359,85 @@ To configure Gemini CLI to use a Google Cloud project, do the following:
     To make this setting persistent, see
     [Persisting Environment Variables](#persisting-vars).
 
+## Use an OpenAI-compatible API <a id="openai"></a>
+
+If you have an OpenAI-compatible endpoint, you can use it with Gemini CLI
+instead of a Google account or a Gemini API key. This covers local servers such
+as Ollama and LM Studio, self-hosted gateways, and hosted providers. Streaming
+responses, tool calling, images, and token usage reporting work against any
+endpoint that implements the OpenAI Chat Completions API. Audio, video, and file
+references have no equivalent in that API and aren't sent to the endpoint.
+
+To authenticate and use Gemini CLI with an OpenAI-compatible API:
+
+1. Set the environment variables that describe your endpoint.
+
+   | Variable                 | Required | Description                                                                                                                              |
+   | :----------------------- | :------- | :--------------------------------------------------------------------------------------------------------------------------------------- |
+   | `GEMINI_API_TYPE`        | Yes      | Enables this mode. The value is case-sensitive and must be exactly `openai`.                                                             |
+   | `GEMINI_OPENAI_BASE_URL` | Yes      | Base URL of the endpoint. If the URL has no path, Gemini CLI appends `/v1`; otherwise the path is used as given.                        |
+   | `GEMINI_OPENAI_API_KEY`  | No       | Bearer token sent in the `Authorization` header. Omit it if your endpoint doesn't require authentication, which is typical for local servers. |
+   | `GEMINI_OPENAI_MODELID`  | Yes      | Identifier of the model to use, in the format your endpoint expects (for example, `gpt-4o`).                                             |
+
+   For example:
+
+   <Tabs>
+     <TabItem label="macOS/Linux">
+
+     ```bash
+     # Replace the placeholder values with your endpoint's details
+     export GEMINI_API_TYPE="openai"
+     export GEMINI_OPENAI_BASE_URL="https://api.example.com/v1"
+     export GEMINI_OPENAI_API_KEY="YOUR_API_KEY"
+     export GEMINI_OPENAI_MODELID="gpt-4o"
+     ```
+
+     </TabItem>
+     <TabItem label="Windows (PowerShell)">
+
+     ```powershell
+     # Replace the placeholder values with your endpoint's details
+     $env:GEMINI_API_TYPE="openai"
+     $env:GEMINI_OPENAI_BASE_URL="https://api.example.com/v1"
+     $env:GEMINI_OPENAI_API_KEY="YOUR_API_KEY"
+     $env:GEMINI_OPENAI_MODELID="gpt-4o"
+     ```
+
+     </TabItem>
+   </Tabs>
+
+   To make these settings persistent, see
+   [Persisting Environment Variables](#persisting-vars).
+
+2. Start the CLI:
+
+   ```bash
+   gemini
+   ```
+
+   Gemini CLI selects **OpenAI API (compatible)** automatically. You can also
+   choose it from the authentication dialog, which then saves it as your
+   selected authentication type.
+
+{/* prettier-ignore */}
+> [!NOTE]
+> `GEMINI_OPENAI_MODELID` is authoritative in this mode. The `--model` flag and
+> the `GEMINI_MODEL` variable don't apply, because Gemini CLI's model aliases
+> and defaults refer to Gemini models.
+
+{/* prettier-ignore */}
+> [!IMPORTANT]
+> Setting `GEMINI_API_TYPE=openai` overrides the authentication type saved in
+> `security.auth.selectedType`. An administrator's `security.auth.enforcedType`
+> setting still takes precedence.
+
+{/* prettier-ignore */}
+> [!WARNING]
+> Treat `GEMINI_OPENAI_API_KEY` as a sensitive credential, the same as any other
+> API key. Use it only with an endpoint you trust, because every prompt and
+> every tool result is sent to that endpoint, including file contents that
+> Gemini CLI reads on your behalf.
+
 ## Persisting environment variables <a id="persisting-vars"></a>
 
 To avoid setting environment variables for every terminal session, you can
@@ -452,6 +532,7 @@ configure authentication using environment variables:
 
 - [Use Gemini API Key](#gemini-api)
 - [Vertex AI](#vertex-ai)
+- [Use an OpenAI-compatible API](#openai)
 
 ## What's next?
 

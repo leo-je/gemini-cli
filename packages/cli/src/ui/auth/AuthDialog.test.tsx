@@ -81,6 +81,7 @@ describe('AuthDialog', () => {
     vi.stubEnv('GEMINI_CLI_USE_COMPUTE_ADC', undefined as unknown as string);
     vi.stubEnv('GEMINI_DEFAULT_AUTH_TYPE', undefined as unknown as string);
     vi.stubEnv('GEMINI_API_KEY', undefined as unknown as string);
+    vi.stubEnv('GEMINI_API_TYPE', undefined as unknown as string);
 
     props = {
       config: {
@@ -198,6 +199,22 @@ describe('AuthDialog', () => {
         },
         expected: AuthType.USE_GEMINI,
         desc: 'from GEMINI_API_KEY env var',
+      },
+      {
+        setup: () => {
+          vi.stubEnv('GEMINI_API_TYPE', 'openai');
+        },
+        expected: AuthType.USE_OPENAI,
+        desc: 'from the GEMINI_API_TYPE switch',
+      },
+      {
+        setup: () => {
+          props.settings.merged.security.auth.selectedType =
+            AuthType.USE_VERTEX_AI;
+          vi.stubEnv('GEMINI_API_TYPE', 'openai');
+        },
+        expected: AuthType.USE_OPENAI,
+        desc: 'from the GEMINI_API_TYPE switch, over a persisted selection',
       },
       {
         setup: () => {},

@@ -31,7 +31,7 @@ import {
   logApiRequest,
   logApiResponse,
 } from '../telemetry/loggers.js';
-import type { ContentGenerator } from './contentGenerator.js';
+import { AuthType, type ContentGenerator } from './contentGenerator.js';
 import { CodeAssistServer } from '../code_assist/server.js';
 import { toContents } from '../code_assist/converter.js';
 import { isStructuredError } from '../utils/quotaErrorDetection.js';
@@ -211,7 +211,25 @@ export class LoggingContentGenerator implements ContentGenerator {
 
     const genConfig = this.config.getContentGeneratorConfig();
 
-    // Case 2: Using an API key for Vertex AI.
+    // Case 2: An OpenAI-compatible endpoint. Reporting the default Google host
+    // here would make every OpenAI request look like Gemini traffic.
+    if (genConfig?.authType === AuthType.USE_OPENAI) {
+      try {
+        const url = new URL(genConfig.baseUrl ?? '');
+        return {
+          address: url.hostname,
+          port: url.port
+            ? parseInt(url.port, 10)
+            : url.protocol === 'https:'
+              ? 443
+              : 80,
+        };
+      } catch {
+        return { address: 'unknown', port: 0 };
+      }
+    }
+
+    // Case 3: Using an API key for Vertex AI.
     if (genConfig?.vertexai) {
       const location = process.env['GOOGLE_CLOUD_LOCATION'];
       if (location) {
@@ -221,7 +239,7 @@ export class LoggingContentGenerator implements ContentGenerator {
       }
     }
 
-    // Case 3: Default to the public Gemini API endpoint.
+    // Case 4: Default to the public Gemini API endpoint.
     // This is used when an API key is provided but not for Vertex AI.
     return { address: `generativelanguage.googleapis.com`, port: 443 };
   }

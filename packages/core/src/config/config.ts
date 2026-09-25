@@ -25,6 +25,7 @@ import {
   type ContentGeneratorConfig,
   type VertexAiRoutingConfig,
 } from '../core/contentGenerator.js';
+import { OPENAI_MODEL_ID_ENV, readEnvValue } from '../core/openai/constants.js';
 import type { OverageStrategy } from '../billing/billing.js';
 import { PromptRegistry } from '../prompts/prompt-registry.js';
 import { ResourceRegistry } from '../resources/resource-registry.js';
@@ -1616,6 +1617,18 @@ export class Config implements McpContext, AgentLoopContext {
     );
     // Only assign to instance properties after successful initialization
     this.contentGeneratorConfig = newContentGeneratorConfig;
+
+    // The model name defaults to the `auto` alias, which is meaningless for an
+    // OpenAI-compatible endpoint and is classified as a Gemini alias by
+    // `isAutoModel` / `isPreviewModel`. Pin the configured model id so the UI,
+    // telemetry, and the outgoing request all agree. `isTemporary` avoids
+    // persisting it over the user's Gemini model setting.
+    if (authMethod === AuthType.USE_OPENAI) {
+      const openaiModelId = readEnvValue(OPENAI_MODEL_ID_ENV, this.env);
+      if (openaiModelId) {
+        this.setModel(openaiModelId);
+      }
+    }
 
     const codeAssistServer = getCodeAssistServer(this);
     const quotaPromise = codeAssistServer?.projectId

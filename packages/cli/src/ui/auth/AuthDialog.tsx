@@ -17,6 +17,7 @@ import {
 import {
   AuthType,
   clearCachedCredentialFile,
+  getExplicitAuthType,
   type Config,
 } from '@google/gemini-cli-core';
 import { useKeypress } from '../hooks/useKeypress.js';
@@ -75,6 +76,11 @@ export function AuthDialog({
       value: AuthType.USE_VERTEX_AI,
       key: AuthType.USE_VERTEX_AI,
     },
+    {
+      label: 'OpenAI API (compatible)',
+      value: AuthType.USE_OPENAI,
+      key: AuthType.USE_OPENAI,
+    },
   ];
 
   if (settings.merged.security.auth.enforcedType) {
@@ -94,9 +100,14 @@ export function AuthDialog({
     defaultAuthType = defaultAuthTypeEnv as AuthType;
   }
 
+  // The GEMINI_API_TYPE=openai switch outranks the persisted selection, matching
+  // how the auth type itself is resolved for authentication.
+  const explicitAuthType = getExplicitAuthType(
+    settings.merged.security.auth.selectedType,
+  );
   let initialAuthIndex = items.findIndex((item) => {
-    if (settings.merged.security.auth.selectedType) {
-      return item.value === settings.merged.security.auth.selectedType;
+    if (explicitAuthType) {
+      return item.value === explicitAuthType;
     }
 
     if (defaultAuthType) {

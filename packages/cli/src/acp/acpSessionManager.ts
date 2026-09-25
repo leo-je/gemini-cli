@@ -9,6 +9,7 @@ import {
   AuthType,
   MCPServerConfig,
   debugLogger,
+  getExplicitAuthType,
   startupProfiler,
   convertSessionToClientHistory,
   createPolicyUpdater,
@@ -69,7 +70,7 @@ export class AcpSessionManager {
     );
 
     const authType =
-      loadedSettings.merged.security.auth.selectedType ||
+      getExplicitAuthType(loadedSettings.merged.security.auth.selectedType) ||
       (authDetails.baseUrl || process.env['GOOGLE_GEMINI_BASE_URL']
         ? AuthType.GATEWAY
         : AuthType.USE_GEMINI);
@@ -235,7 +236,7 @@ export class AcpSessionManager {
     authDetails: AuthDetails,
   ): Promise<Config> {
     const selectedAuthType =
-      this.settings.merged.security.auth.selectedType ||
+      getExplicitAuthType(this.settings.merged.security.auth.selectedType) ||
       (authDetails.baseUrl || process.env['GOOGLE_GEMINI_BASE_URL']
         ? AuthType.GATEWAY
         : undefined);
