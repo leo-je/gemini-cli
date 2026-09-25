@@ -534,9 +534,8 @@ git checkout new-version-openai
 git merge upstream/main          # 或 git rebase upstream/main
 ```
 
-本功能的改动都落在三个提交里（`023934a1d 适配openai`、`3f333a255 openai-gzip自解压`、`openai自定义请求头`；最后一条按标题在
-`git log`
-里找——它一旦被改写哈希就会变，故不在此处写死），因此也可以用"重新贴一遍"的方式绕开纠缠型冲突：
+本功能的改动都落在 `87de0b636`
+之上的提交里（`023934a1d 适配openai`、`3f333a255 openai-gzip自解压`、`openai自定义请求头`，以及其后若干文档补充），因此也可以用"重新贴一遍"的方式绕开纠缠型冲突：
 
 ```bash
 git format-patch 87de0b636..HEAD -o /tmp/openai-patch
@@ -595,7 +594,8 @@ npm start -- -p "Say hello"
 ### 摘除本功能
 
 若上游将来原生支持了 OpenAI 端点，`git revert 3f333a255 023934a1d` 加上
-`openai自定义请求头` 那条即可：新增目录、新文档与 `settings.schema.json`
+`openai自定义请求头` 那条及其后的文档补充即可：新增目录、新文档与
+`settings.schema.json`
 的改动随之删除，无需清理散落的补丁。该前提（`openai/*.test.ts`
 已进入提交，见上文 `git add -f` 说明）现已满足——`git revert`
 只回滚已跟踪的文件，被 gitignore 挡住的孤立测试文件会留在盘上，且 import 的是已被删除的模块，`vitest`
