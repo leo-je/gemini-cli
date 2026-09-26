@@ -120,6 +120,12 @@ jobs:
       - name: 'Package Binary'
         id: 'package'
         if: "matrix.os != 'windows-latest'"
+        # Plain `tar` with no GNU-only flags. `--force-local` was needed when
+        # Windows also used tar (its `D:\...` archive path was read as a
+        # `host:path` remote request), but Windows now goes through
+        # Compress-Archive above. What is left runs on Linux and macOS, and
+        # macOS ships BSD tar, which rejects that flag outright with
+        # "Option --force-local is not supported".
         run: |
           VERSION=$(node -p "require('./package.json').version")
           PLATFORM="${{ matrix.platform_name }}"
@@ -127,7 +133,7 @@ jobs:
 
           # Output to RUNNER_TEMP so the archive cannot land inside the
           # directory it is packing.
-          tar --force-local -czf "$RUNNER_TEMP/$ARCHIVE" -C "dist/$PLATFORM" .
+          tar -czf "$RUNNER_TEMP/$ARCHIVE" -C "dist/$PLATFORM" .
 
           echo "asset=$ARCHIVE" >> "$GITHUB_OUTPUT"
           ls -la "$RUNNER_TEMP/$ARCHIVE"
