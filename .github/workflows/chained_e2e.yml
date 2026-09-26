@@ -1,21 +1,26 @@
 name: 'Testing: E2E (Chained)'
 
-on:
-  push:
-    branches:
-      - 'main'
-  merge_group:
-  workflow_run:
-    workflows: ['Trigger E2E']
-    types: ['completed']
-  workflow_dispatch:
-    inputs:
-      head_sha:
-        description: 'SHA of the commit to test'
-        required: true
-      repo_name:
-        description: 'Repository name (e.g., owner/repo)'
-        required: true
+# ── 触发器已禁用 ──────────────────────────────────────────
+# 本 fork 不使用 GitHub Actions。下方 on: 块已整体注释，
+# 工作流因此不会触发，也不消耗 Actions 额度。
+# 需要恢复时去掉本行与 on: 块的注释前缀即可。
+# ──────────────────────────────────────────────────────────
+# on:
+#   push:
+#     branches:
+#       - 'main'
+#   merge_group:
+#   workflow_run:
+#     workflows: ['Trigger E2E']
+#     types: ['completed']
+#   workflow_dispatch:
+#     inputs:
+#       head_sha:
+#         description: 'SHA of the commit to test'
+#         required: true
+#       repo_name:
+#         description: 'Repository name (e.g., owner/repo)'
+#         required: true
 
 concurrency:
   group: '${{ github.workflow }}-${{ github.head_ref || github.event.workflow_run.head_branch || github.ref }}'

@@ -1,9 +1,14 @@
 name: '🔄 Gemini CLI Bot: Pulse'
 
-on:
-  schedule:
-    - cron: '*/30 * * * *' # Every 30 minutes
-  workflow_dispatch:
+# ── 触发器已禁用 ──────────────────────────────────────────
+# 本 fork 不使用 GitHub Actions。下方 on: 块已整体注释，
+# 工作流因此不会触发，也不消耗 Actions 额度。
+# 需要恢复时去掉本行与 on: 块的注释前缀即可。
+# ──────────────────────────────────────────────────────────
+# on:
+#   schedule:
+#     - cron: '*/30 * * * *' # Every 30 minutes
+#   workflow_dispatch:
 
 concurrency:
   group: '${{ github.workflow }}-${{ github.ref }}'
