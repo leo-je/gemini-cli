@@ -96,15 +96,16 @@ jobs:
 
       - name: 'Package Binary'
         id: 'package'
-        # The dist dir also holds policies and sandbox .sb files, so archive
-        # the whole directory rather than the single binary. Output goes to
-        # RUNNER_TEMP so `zip -r .` cannot pick up the archive it is writing.
+        # `tar` rather than `zip`: the Windows runner's Git Bash has no zip on
+        # PATH (it is not part of the base image), while tar ships everywhere
+        # including Windows. Output goes to RUNNER_TEMP so the archive cannot
+        # end up inside the directory it is packing.
         run: |
           VERSION=$(node -p "require('./package.json').version")
           PLATFORM="${{ matrix.platform_name }}"
-          ARCHIVE="gemini-$PLATFORM-$VERSION.zip"
+          ARCHIVE="gemini-$PLATFORM-$VERSION.tar.gz"
 
-          (cd "dist/$PLATFORM" && zip -r "$RUNNER_TEMP/$ARCHIVE" .)
+          tar -czf "$RUNNER_TEMP/$ARCHIVE" -C "dist/$PLATFORM" .
 
           echo "asset=$ARCHIVE" >> "$GITHUB_OUTPUT"
           ls -la "$RUNNER_TEMP/$ARCHIVE"
@@ -117,9 +118,65 @@ jobs:
           retention-days: 7
           if-no-files-found: 'error'
 
+  bundle:
+    name: 'Build JS Bundle'
+    # The bundle is pure JS with no native modules, so one linux build serves
+    # every platform — it needs a Node runtime rather than a self-contained
+    # binary. Built once and shipped alongside the per-platform binaries, which
+    # is what the upstream release does.
+    runs-on: 'ubuntu-latest'
+
+    steps:
+      - name: 'Checkout'
+        uses: 'actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8' # ratchet:actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: 'Set up Node.js'
+        uses: 'actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020' # ratchet:actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+          cache: 'npm'
+
+      - name: 'Install dependencies'
+        run: 'npm ci'
+
+      - name: 'Build Bundle'
+        run: 'npm run bundle'
+
+      - name: 'Package Bundle'
+        id: 'package'
+        # zip is available on the ubuntu runner (it is not on windows-latest —
+        # see the binary job). Named without a platform suffix so it is
+        # recognisable as the cross-platform asset.
+        run: |
+          set -euo pipefail
+
+          chmod +x bundle/gemini.js
+          (cd bundle && zip -r "$RUNNER_TEMP/gemini-cli-bundle.zip" .)
+
+          # Prove the archive is self-contained before publishing it.
+          rm -rf test-bundle
+          mkdir -p test-bundle
+          unzip -q "$RUNNER_TEMP/gemini-cli-bundle.zip" -d test-bundle
+          VERSION_OUT=$(node test-bundle/gemini.js --version)
+          echo "Bundle reports version: ${VERSION_OUT}"
+          rm -rf test-bundle
+
+          echo "asset=gemini-cli-bundle.zip" >> "$GITHUB_OUTPUT"
+          ls -la "$RUNNER_TEMP/gemini-cli-bundle.zip"
+
+      - name: 'Upload Artifact'
+        uses: 'actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02' # ratchet:actions/upload-artifact@v4
+        with:
+          name: 'gemini-${{ steps.package.outputs.asset }}'
+          path: '${{ runner.temp }}/${{ steps.package.outputs.asset }}'
+          retention-days: 7
+          if-no-files-found: 'error'
+
   release:
     name: 'Publish Release'
-    needs: 'build'
+    needs: ['build', 'bundle']
     runs-on: 'ubuntu-latest'
 
     steps:
