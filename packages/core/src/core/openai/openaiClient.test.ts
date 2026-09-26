@@ -251,6 +251,111 @@ describe('OpenAICompatibleClient', () => {
     expect((error as Error).message).toContain('bad model');
   });
 
+  it('reports the whole body when error.message hides the cause', async () => {
+    // Observed against OpenRouter: `message` is a fixed string and the real
+    // reason ("content is not a supported image type") lives in a sibling
+    // field. Reporting only the message left the user with no way to diagnose it.
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            error: {
+              message: 'Provider returned error',
+              code: 400,
+              metadata: {
+                provider_name: 'Thinking Machines',
+                raw: '{"error":{"message":"content is not a supported image type (png, jpeg, gif, webp)","type":"airlock_error"}}',
+              },
+            },
+          }),
+          { status: 400 },
+        ),
+      ),
+    );
+
+    const client = new OpenAICompatibleClient({
+      baseUrl: 'https://example.test/v1',
+      apiKey: 'k',
+    });
+    const error = await client
+      .chatCompletion({ model: 'm', messages: [] })
+      .catch((e: unknown) => e);
+
+    const message = (error as Error).message;
+    expect(message).toContain('Provider returned error');
+    // The nested cause must survive into the message the user sees.
+    expect(message).toContain('content is not a supported image type');
+    // The untruncated body is kept for a debug dump.
+    expect((error as OpenAIHttpError).body).toContain('airlock_error');
+  });
+
+  it('truncates a very large error body in the message but keeps it on the error', async () => {
+    const huge = 'x'.repeat(5000);
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(new Response(huge, { status: 500 })),
+    );
+
+    const client = new OpenAICompatibleClient({
+      baseUrl: 'https://example.test/v1',
+      apiKey: 'k',
+    });
+    const error = await client
+      .chatCompletion({ model: 'm', messages: [] })
+      .catch((e: unknown) => e);
+
+    const message = (error as Error).message;
+    expect(message).toContain('truncated');
+    expect(message.length).toBeLessThan(huge.length);
+    expect((error as OpenAIHttpError).body).toHaveLength(5000);
+  });
+
+  it('collapses newlines in the body so the message stays a single line', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        new Response('{\n  "error": {\n    "message": "boom"\n  }\n}', {
+          status: 500,
+        }),
+      ),
+    );
+
+    const client = new OpenAICompatibleClient({
+      baseUrl: 'https://example.test/v1',
+      apiKey: 'k',
+    });
+    const error = await client
+      .chatCompletion({ model: 'm', messages: [] })
+      .catch((e: unknown) => e);
+
+    expect((error as Error).message).not.toContain('\n');
+  });
+
+  it('omits the body suffix when the response has no readable body', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockResolvedValue(
+          new Response(null, { status: 502, statusText: 'Bad Gateway' }),
+        ),
+    );
+
+    const client = new OpenAICompatibleClient({
+      baseUrl: 'https://example.test/v1',
+      apiKey: 'k',
+    });
+    const error = await client
+      .chatCompletion({ model: 'm', messages: [] })
+      .catch((e: unknown) => e);
+
+    expect((error as Error).message).toBe(
+      'OpenAI-compatible endpoint returned HTTP 502',
+    );
+    expect((error as OpenAIHttpError).body).toBeUndefined();
+  });
+
   it('decodes a gzip error body that arrived without a content-encoding header', async () => {
     // Observed against a Cloudflare-fronted endpoint reached through a proxy
     // dispatcher: the body arrives gzipped but the header is absent, so the

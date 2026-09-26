@@ -41,15 +41,46 @@ const STREAM_IDLE_TIMEOUT_MS = 300_000;
  *
  * Carries `status` so the CLI's retry layer (`isRetryableError`, which reads
  * `error.status`) retries 429 and 5xx exactly as it does for Gemini.
+ *
+ * `body` holds the decoded response body. Endpoints routinely bury the actual
+ * cause away from `error.message` — a gateway may report a generic
+ * "Provider returned error" and put the real reason in a nested field, so
+ * dropping the body would leave the user with a message that names the status
+ * and nothing else.
  */
 export class OpenAIHttpError extends Error {
   readonly status: number;
+  /** The decoded response body, or `undefined` when it could not be read. */
+  readonly body?: string;
 
-  constructor(message: string, status: number) {
+  constructor(message: string, status: number, body?: string) {
     super(message);
     this.name = 'OpenAIHttpError';
     this.status = status;
+    this.body = body;
   }
+}
+
+/**
+ * Renders a response body for an error message.
+ *
+ * The whole body is included rather than just `error.message`, because the
+ * useful text is often one level deeper — an OpenAI-compatible gateway will
+ * report `{"error":{"message":"Provider returned error","metadata":{"raw":
+ * "..."}}}` where only `metadata.raw` says what actually went wrong.
+ *
+ * Truncated because an error body can be arbitrarily large (a proxy echoing a
+ * failed request, say) and this text is rendered into a single UI line. The
+ * debug log keeps the untruncated body.
+ */
+const MAX_ERROR_BODY_CHARS = 2000;
+
+function formatErrorBody(text: string): string {
+  const collapsed = text.replace(/\s+/g, ' ').trim();
+  if (collapsed.length <= MAX_ERROR_BODY_CHARS) {
+    return collapsed;
+  }
+  return `${collapsed.slice(0, MAX_ERROR_BODY_CHARS)}… (truncated, ${collapsed.length} chars total)`;
 }
 
 type FetchOptions = RequestInit & { dispatcher?: undici.Dispatcher };
@@ -151,38 +182,32 @@ async function readResponseText(response: Response): Promise<string> {
   return decodeCompressedBody(bytes).toString('utf8');
 }
 
+/**
+ * Builds an `OpenAIHttpError` from a failed response.
+ *
+ * `error.message` alone is often not enough to act on. An OpenAI-compatible
+ * gateway can answer `{"error":{"message":"Provider returned error","metadata":
+ * {"raw":"...content is not a supported image type..."}}}` — the message is a
+ * fixed string and the actual cause sits in a sibling field. So the full body
+ * is reported rather than just the extracted message, and kept on the error so
+ * a debug dump can show it untruncated.
+ */
 async function toHttpError(response: Response): Promise<OpenAIHttpError> {
-  let detail = '';
+  let body = '';
   try {
-    const text = await readResponseText(response);
-    if (text) {
-      try {
-        const parsed: unknown = JSON.parse(text);
-        if (
-          typeof parsed === 'object' &&
-          parsed !== null &&
-          'error' in parsed &&
-          typeof parsed.error === 'object' &&
-          parsed.error !== null &&
-          'message' in parsed.error &&
-          typeof parsed.error.message === 'string'
-        ) {
-          detail = parsed.error.message;
-        } else {
-          detail = text;
-        }
-      } catch {
-        detail = text;
-      }
-    }
+    body = await readResponseText(response);
   } catch {
-    detail = '';
+    // A body that cannot be read (already consumed, truncated connection) still
+    // leaves the status worth reporting.
+    body = '';
   }
-  const suffix = detail ? `: ${detail}` : '';
-  return new OpenAIHttpError(
-    `OpenAI-compatible endpoint returned HTTP ${response.status}${suffix}`,
-    response.status,
-  );
+
+  const summary = body ? formatErrorBody(body) : '';
+  const message = summary
+    ? `OpenAI-compatible endpoint returned HTTP ${response.status}: ${summary}`
+    : `OpenAI-compatible endpoint returned HTTP ${response.status}`;
+
+  return new OpenAIHttpError(message, response.status, body || undefined);
 }
 
 export class OpenAICompatibleClient {
@@ -302,9 +327,12 @@ export class OpenAICompatibleClient {
     try {
       return JSON.parse(text);
     } catch {
+      // The body is not JSON, so it is the only description of the failure
+      // available — report it in full rather than a 200-character glimpse.
       throw new OpenAIHttpError(
-        `OpenAI-compatible endpoint returned a non-JSON response: ${text.slice(0, 200)}`,
+        `OpenAI-compatible endpoint returned a non-JSON response: ${formatErrorBody(text)}`,
         response.status,
+        text || undefined,
       );
     }
   }
