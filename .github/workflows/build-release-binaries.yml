@@ -94,18 +94,32 @@ jobs:
             "./dist/${{ matrix.platform_name }}/gemini" --version
           fi
 
+      # Windows gets its own step because neither of the two tools used below
+      # is dependable there: Git Bash on the windows runner has no `zip` on
+      # PATH, and GNU tar reads a `-f` argument of the form `host:path` as a
+      # remote-host request, so the archive path `D:\a\_temp\...` is misread
+      # and it fails with "Cannot connect to D: resolve failed".
+      # `Compress-Archive` ships with Windows, so it needs nothing installed.
+      - name: 'Package Binary (Windows)'
+        id: 'package-win'
+        if: "matrix.os == 'windows-latest'"
+        shell: 'pwsh'
+        run: |
+          $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          $platform = '${{ matrix.platform_name }}'
+          $archive = "gemini-$platform-$version.zip"
+          $dest = Join-Path $env:RUNNER_TEMP $archive
+
+          # Writes to RUNNER_TEMP so the archive cannot land inside the
+          # directory being packed.
+          Compress-Archive -Path "dist/$platform/*" -DestinationPath $dest
+
+          "asset=$archive" >> $env:GITHUB_OUTPUT
+          Get-Item $dest | Format-List Name, Length
+
       - name: 'Package Binary'
         id: 'package'
-        # `tar` rather than `zip`: the Windows runner's Git Bash has no zip on
-        # PATH (it is not part of the base image), while tar ships everywhere
-        # including Windows.
-        #
-        # `--force-local` is required. GNU tar reads a `-f` argument of the
-        # form `host:path` as a request to read from a remote host, so on
-        # Windows the archive path `D:\a\_temp\...` is misread — the drive
-        # letter's colon is taken as the host separator and it fails with
-        # "Cannot connect to D: resolve failed". This flag disables that
-        # interpretation.
+        if: "matrix.os != 'windows-latest'"
         run: |
           VERSION=$(node -p "require('./package.json').version")
           PLATFORM="${{ matrix.platform_name }}"
@@ -118,11 +132,13 @@ jobs:
           echo "asset=$ARCHIVE" >> "$GITHUB_OUTPUT"
           ls -la "$RUNNER_TEMP/$ARCHIVE"
 
+      # Only one of the two packaging steps above runs per matrix entry, so the
+      # other step's outputs are empty. The `||` picks whichever was set.
       - name: 'Upload Artifact'
         uses: 'actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02' # ratchet:actions/upload-artifact@v4
         with:
-          name: 'gemini-${{ steps.package.outputs.asset }}'
-          path: '${{ runner.temp }}/${{ steps.package.outputs.asset }}'
+          name: 'gemini-${{ steps.package-win.outputs.asset || steps.package.outputs.asset }}'
+          path: '${{ runner.temp }}/${{ steps.package-win.outputs.asset || steps.package.outputs.asset }}'
           retention-days: 7
           if-no-files-found: 'error'
 
