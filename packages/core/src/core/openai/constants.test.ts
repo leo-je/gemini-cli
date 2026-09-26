@@ -5,7 +5,11 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { parseHeaderJson, readEnvValue } from './constants.js';
+import {
+  parseHeaderJson,
+  readEnvValue,
+  readEnvWithFallback,
+} from './constants.js';
 
 describe('parseHeaderJson', () => {
   it('treats an absent value as no headers', () => {
@@ -147,5 +151,58 @@ describe('readEnvValue', () => {
     expect(
       readEnvValue('GEMINI_OPENAI_HEADERS', { GEMINI_OPENAI_HEADERS: '' }),
     ).toBe('');
+  });
+});
+
+describe('readEnvWithFallback', () => {
+  it('prefers the OpenAI-named variable when both are set', () => {
+    expect(
+      readEnvWithFallback('GEMINI_OPENAI_MODELID', 'GEMINI_MODEL', {
+        GEMINI_OPENAI_MODELID: 'openai-model',
+        GEMINI_MODEL: 'gemini-model',
+      }),
+    ).toBe('openai-model');
+  });
+
+  it('falls back to the Gemini-named variable when the primary is absent', () => {
+    expect(
+      readEnvWithFallback('GEMINI_OPENAI_BASE_URL', 'GOOGLE_GEMINI_BASE_URL', {
+        GOOGLE_GEMINI_BASE_URL: 'https://gateway.example',
+      }),
+    ).toBe('https://gateway.example');
+  });
+
+  it('treats an empty primary as unset so the fallback still applies', () => {
+    // A shell script that clears an inherited variable exports it as empty.
+    // Reading that as a deliberate blank endpoint would turn a missing setting
+    // into a confusing network error instead of the documented fallback.
+    expect(
+      readEnvWithFallback('GEMINI_OPENAI_API_KEY', 'GEMINI_API_KEY', {
+        GEMINI_OPENAI_API_KEY: '',
+        GEMINI_API_KEY: 'fallback-key',
+      }),
+    ).toBe('fallback-key');
+  });
+
+  it('returns undefined when neither is set', () => {
+    expect(
+      readEnvWithFallback('GEMINI_OPENAI_MODELID', 'GEMINI_MODEL', {}),
+    ).toBeUndefined();
+  });
+
+  it('falls back to the process environment', () => {
+    const previous = process.env['GEMINI_MODEL'];
+    process.env['GEMINI_MODEL'] = 'ambient-model';
+    try {
+      expect(readEnvWithFallback('GEMINI_OPENAI_MODELID', 'GEMINI_MODEL')).toBe(
+        'ambient-model',
+      );
+    } finally {
+      if (previous === undefined) {
+        delete process.env['GEMINI_MODEL'];
+      } else {
+        process.env['GEMINI_MODEL'] = previous;
+      }
+    }
   });
 });

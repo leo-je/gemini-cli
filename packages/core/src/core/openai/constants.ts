@@ -21,6 +21,38 @@ export const OPENAI_MODEL_ID_ENV = 'GEMINI_OPENAI_MODELID';
 export const OPENAI_HEADERS_ENV = 'GEMINI_OPENAI_HEADERS';
 
 /**
+ * Fallback names for the three settings above, read only when the OpenAI-named
+ * variable is absent.
+ *
+ * This lets a configuration that predates the `GEMINI_OPENAI_*` prefix keep
+ * working: `GEMINI_API_KEY`, `GOOGLE_GEMINI_BASE_URL`, and `GEMINI_MODEL` are
+ * the names the Gemini path already uses, and a user who has only ever set
+ * those should not have to duplicate them to switch backends. The
+ * `GEMINI_OPENAI_*` variable always wins when both are present, so this can
+ * never mask an explicit OpenAI-mode setting.
+ */
+export const OPENAI_API_KEY_FALLBACK_ENV = 'GEMINI_API_KEY';
+export const OPENAI_BASE_URL_FALLBACK_ENV = 'GOOGLE_GEMINI_BASE_URL';
+export const OPENAI_MODEL_ID_FALLBACK_ENV = 'GEMINI_MODEL';
+
+/**
+ * Reads the OpenAI-mode value for `primary`, falling back to `fallback` when
+ * the primary is unset or empty.
+ *
+ * An empty string counts as unset: `export GEMINI_OPENAI_BASE_URL=` is how a
+ * shell script clears a variable it inherited, and treating that as a
+ * deliberate blank endpoint would turn a missing setting into a confusing
+ * network error instead of the documented fallback.
+ */
+export function readEnvWithFallback(
+  primary: string,
+  fallback: string,
+  configEnv?: Record<string, string>,
+): string | undefined {
+  return readEnvValue(primary, configEnv) || readEnvValue(fallback, configEnv);
+}
+
+/**
  * Reads an environment variable, preferring values injected through
  * `Config.env` (which `.env` loading and settings populate) over the ambient
  * process environment.

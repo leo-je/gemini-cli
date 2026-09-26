@@ -30,6 +30,11 @@ describe('validateAuthMethod', () => {
     vi.stubEnv('GOOGLE_CLOUD_PROJECT', undefined);
     vi.stubEnv('GOOGLE_CLOUD_LOCATION', undefined);
     vi.stubEnv('GOOGLE_API_KEY', undefined);
+    vi.stubEnv('GEMINI_OPENAI_BASE_URL', undefined);
+    vi.stubEnv('GEMINI_OPENAI_MODELID', undefined);
+    vi.stubEnv('GEMINI_OPENAI_HEADERS', undefined);
+    vi.stubEnv('GOOGLE_GEMINI_BASE_URL', undefined);
+    vi.stubEnv('GEMINI_MODEL', undefined);
   });
 
   afterEach(() => {
@@ -98,6 +103,51 @@ describe('validateAuthMethod', () => {
       authType: 'invalid-method' as any,
       envs: {},
       expected: 'Invalid auth method selected.',
+    },
+    {
+      description:
+        'should return null for USE_OPENAI when only the OpenAI-named vars are set',
+      authType: AuthType.USE_OPENAI,
+      envs: {
+        GEMINI_OPENAI_BASE_URL: 'https://api.example/v1',
+        GEMINI_OPENAI_MODELID: 'some-model',
+      },
+      expected: null,
+    },
+    {
+      description:
+        'should return null for USE_OPENAI when only the fallback vars are set',
+      authType: AuthType.USE_OPENAI,
+      envs: {
+        GOOGLE_GEMINI_BASE_URL: 'https://gateway.example',
+        GEMINI_MODEL: 'some-model',
+      },
+      expected: null,
+    },
+    {
+      description: 'should accept a mix of OpenAI-named and fallback vars',
+      authType: AuthType.USE_OPENAI,
+      envs: {
+        GOOGLE_GEMINI_BASE_URL: 'https://gateway.example',
+        GEMINI_OPENAI_MODELID: 'some-model',
+      },
+      expected: null,
+    },
+    {
+      description: 'should still require a base URL when neither name is set',
+      authType: AuthType.USE_OPENAI,
+      envs: { GEMINI_OPENAI_MODELID: 'some-model' },
+      expected:
+        'When using an OpenAI-compatible API, you must specify the GEMINI_OPENAI_BASE_URL environment variable.\n' +
+        'Update your environment and try again (no reload needed if using .env)!',
+    },
+    {
+      description: 'should still require a model id when neither name is set',
+      authType: AuthType.USE_OPENAI,
+      envs: { GEMINI_OPENAI_BASE_URL: 'https://api.example/v1' },
+      expected:
+        'When using an OpenAI-compatible API, you must specify the GEMINI_OPENAI_MODELID environment variable.\n' +
+        'Update your environment and try again (no reload needed if using .env)!',
     },
   ])('$description', async ({ authType, envs, expected }) => {
     for (const [key, value] of Object.entries(envs)) {

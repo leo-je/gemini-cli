@@ -46,13 +46,19 @@ export async function validateAuthMethod(
   }
 
   if (authMethod === AuthType.USE_OPENAI) {
-    if (!process.env['GEMINI_OPENAI_BASE_URL']) {
+    // Each setting falls back to the name the Gemini path already uses, so a
+    // configuration written before the `GEMINI_OPENAI_*` prefix keeps working.
+    // The OpenAI-named variable wins whenever it is set.
+    if (
+      !process.env['GEMINI_OPENAI_BASE_URL'] &&
+      !process.env['GOOGLE_GEMINI_BASE_URL']
+    ) {
       return (
         'When using an OpenAI-compatible API, you must specify the GEMINI_OPENAI_BASE_URL environment variable.\n' +
         'Update your environment and try again (no reload needed if using .env)!'
       );
     }
-    if (!process.env['GEMINI_OPENAI_MODELID']) {
+    if (!process.env['GEMINI_OPENAI_MODELID'] && !process.env['GEMINI_MODEL']) {
       return (
         'When using an OpenAI-compatible API, you must specify the GEMINI_OPENAI_MODELID environment variable.\n' +
         'Update your environment and try again (no reload needed if using .env)!'

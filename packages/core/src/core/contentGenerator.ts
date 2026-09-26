@@ -35,7 +35,9 @@ import { getBackendModelMappings } from '../config/models.js';
 import { OpenAIContentGenerator } from './openai/openaiContentGenerator.js';
 import {
   OPENAI_API_KEY_ENV,
+  OPENAI_API_KEY_FALLBACK_ENV,
   OPENAI_BASE_URL_ENV,
+  OPENAI_BASE_URL_FALLBACK_ENV,
   GEMINI_API_TYPE_ENV,
   OPENAI_API_TYPE,
 } from './openai/constants.js';
@@ -236,14 +238,22 @@ export async function createContentGeneratorConfig(
     authType === AuthType.USE_OPENAI
   ) {
     if (authType === AuthType.USE_OPENAI) {
-      // Credentials come from their own env vars; the Gemini keychain and
-      // GEMINI_API_KEY must not be consulted. An empty key is legitimate here
-      // because local servers (Ollama, LM Studio) usually accept unauthenticated
-      // requests.
+      // Credentials come from their own env vars. An empty key is legitimate
+      // here because local servers (Ollama, LM Studio) usually accept
+      // unauthenticated requests. Each value falls back to the name the Gemini
+      // path already uses, so a configuration written before the
+      // `GEMINI_OPENAI_*` prefix keeps working; the OpenAI-named variable wins
+      // whenever it is set.
       contentGeneratorConfig.apiKey =
-        apiKey || getEnv(OPENAI_API_KEY_ENV) || '';
+        apiKey ||
+        getEnv(OPENAI_API_KEY_ENV) ||
+        getEnv(OPENAI_API_KEY_FALLBACK_ENV) ||
+        '';
       contentGeneratorConfig.baseUrl =
-        baseUrl || getEnv(OPENAI_BASE_URL_ENV) || '';
+        baseUrl ||
+        getEnv(OPENAI_BASE_URL_ENV) ||
+        getEnv(OPENAI_BASE_URL_FALLBACK_ENV) ||
+        '';
       contentGeneratorConfig.vertexai = false;
     }
     return contentGeneratorConfig;

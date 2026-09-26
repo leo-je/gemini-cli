@@ -51,8 +51,10 @@ import type { OpenAIChatCompletion, OpenAIResponseToolCall } from './types.js';
 import {
   OPENAI_HEADERS_ENV,
   OPENAI_MODEL_ID_ENV,
+  OPENAI_MODEL_ID_FALLBACK_ENV,
   parseHeaderJson,
   readEnvValue,
+  readEnvWithFallback,
 } from './constants.js';
 
 /** A partially accumulated `tool_calls` entry spread across stream deltas. */
@@ -67,7 +69,11 @@ export class OpenAIContentGenerator implements ContentGenerator {
   private readonly configuredModelId: string | undefined;
 
   constructor(config: ContentGeneratorConfig, gcConfig: Config) {
-    this.configuredModelId = readEnvValue(OPENAI_MODEL_ID_ENV, gcConfig.env);
+    this.configuredModelId = readEnvWithFallback(
+      OPENAI_MODEL_ID_ENV,
+      OPENAI_MODEL_ID_FALLBACK_ENV,
+      gcConfig.env,
+    );
     // `GEMINI_OPENAI_HEADERS` is merged over `config.customHeaders`, so the
     // user's explicit environment setting beats any programmatic default.
     const configuredHeaders = parseHeaderJson(
@@ -84,15 +90,16 @@ export class OpenAIContentGenerator implements ContentGenerator {
   /**
    * Resolves the model to send to the endpoint.
    *
-   * `GEMINI_OPENAI_MODELID` is authoritative and required. The rest of the CLI
-   * still reasons in Gemini model names, so letting `request.model` through
+   * The model id is authoritative and required, taken from
+   * `GEMINI_OPENAI_MODELID` or, failing that, `GEMINI_MODEL`. The rest of the
+   * CLI still reasons in Gemini model names, so letting `request.model` through
    * would send something like `auto` or `gemini-3-pro` to an endpoint that has
    * never heard of it. `--model` therefore has no effect in this mode.
    */
   private resolveModelId(): string {
     if (!this.configuredModelId) {
       throw new Error(
-        `${OPENAI_MODEL_ID_ENV} must be set when GEMINI_API_TYPE=openai.`,
+        `${OPENAI_MODEL_ID_ENV} (or ${OPENAI_MODEL_ID_FALLBACK_ENV}) must be set when GEMINI_API_TYPE=openai.`,
       );
     }
     return this.configuredModelId;

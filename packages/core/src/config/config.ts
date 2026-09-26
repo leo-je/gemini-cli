@@ -25,7 +25,11 @@ import {
   type ContentGeneratorConfig,
   type VertexAiRoutingConfig,
 } from '../core/contentGenerator.js';
-import { OPENAI_MODEL_ID_ENV, readEnvValue } from '../core/openai/constants.js';
+import {
+  OPENAI_MODEL_ID_ENV,
+  OPENAI_MODEL_ID_FALLBACK_ENV,
+  readEnvWithFallback,
+} from '../core/openai/constants.js';
 import type { OverageStrategy } from '../billing/billing.js';
 import { PromptRegistry } from '../prompts/prompt-registry.js';
 import { ResourceRegistry } from '../resources/resource-registry.js';
@@ -1624,7 +1628,11 @@ export class Config implements McpContext, AgentLoopContext {
     // telemetry, and the outgoing request all agree. `isTemporary` avoids
     // persisting it over the user's Gemini model setting.
     if (authMethod === AuthType.USE_OPENAI) {
-      const openaiModelId = readEnvValue(OPENAI_MODEL_ID_ENV, this.env);
+      const openaiModelId = readEnvWithFallback(
+        OPENAI_MODEL_ID_ENV,
+        OPENAI_MODEL_ID_FALLBACK_ENV,
+        this.env,
+      );
       if (openaiModelId) {
         this.setModel(openaiModelId);
       }
