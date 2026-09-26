@@ -98,14 +98,22 @@ jobs:
         id: 'package'
         # `tar` rather than `zip`: the Windows runner's Git Bash has no zip on
         # PATH (it is not part of the base image), while tar ships everywhere
-        # including Windows. Output goes to RUNNER_TEMP so the archive cannot
-        # end up inside the directory it is packing.
+        # including Windows.
+        #
+        # `--force-local` is required. GNU tar reads a `-f` argument of the
+        # form `host:path` as a request to read from a remote host, so on
+        # Windows the archive path `D:\a\_temp\...` is misread — the drive
+        # letter's colon is taken as the host separator and it fails with
+        # "Cannot connect to D: resolve failed". This flag disables that
+        # interpretation.
         run: |
           VERSION=$(node -p "require('./package.json').version")
           PLATFORM="${{ matrix.platform_name }}"
           ARCHIVE="gemini-$PLATFORM-$VERSION.tar.gz"
 
-          tar -czf "$RUNNER_TEMP/$ARCHIVE" -C "dist/$PLATFORM" .
+          # Output to RUNNER_TEMP so the archive cannot land inside the
+          # directory it is packing.
+          tar --force-local -czf "$RUNNER_TEMP/$ARCHIVE" -C "dist/$PLATFORM" .
 
           echo "asset=$ARCHIVE" >> "$GITHUB_OUTPUT"
           ls -la "$RUNNER_TEMP/$ARCHIVE"
