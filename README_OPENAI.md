@@ -30,6 +30,10 @@ gemini -p "Say hello"
 不需要在认证对话框里做任何选择——`GEMINI_API_TYPE=openai` 会直接选中 **OpenAI API
 (compatible)** 并跳过对话框。
 
+已经用 `GEMINI_API_KEY` / `GOOGLE_GEMINI_BASE_URL` / `GEMINI_MODEL`
+配置过的，只设 `GEMINI_API_TYPE=openai`
+也能跑，这三个变量会作为降级来源被读取。见 [降级来源](#降级来源)。
+
 ### 本地服务示例
 
 指向 Ollama、vLLM、LM Studio 等本地服务时不需要 API key：
@@ -44,13 +48,46 @@ export GEMINI_OPENAI_MODELID="qwen2.5-coder:14b"
 
 ## 环境变量
 
-| 变量                     | 必需 | 说明                                                                                                |
-| :----------------------- | :--- | :-------------------------------------------------------------------------------------------------- |
-| `GEMINI_API_TYPE`        | 是   | 模式开关。**区分大小写**，必须精确等于 `openai`。`OpenAI`、`openai `（带空格）都不会生效。          |
-| `GEMINI_OPENAI_BASE_URL` | 是   | 端点根地址。URL 没有路径时会自动补 `/v1`；已有路径则原样使用，所以需要 `/v1` 的端点请自己写全。     |
-| `GEMINI_OPENAI_API_KEY`  | 否   | 以 `Authorization: Bearer` 头发送。为空时不发送该头，适用于无鉴权的本地服务。                       |
-| `GEMINI_OPENAI_MODELID`  | 是   | 发给端点的模型名。**这是唯一权威来源，`--model` 和 `GEMINI_MODEL` 在此模式下无效。**                |
-| `GEMINI_OPENAI_HEADERS`  | 否   | 自定义请求头，JSON 对象。**可以覆盖任何内置头**（头名大小写不敏感），含 `Authorization`。详见下节。 |
+| 变量                     | 必需 | 降级来源                 | 说明                                                                                                |
+| :----------------------- | :--- | :----------------------- | :-------------------------------------------------------------------------------------------------- |
+| `GEMINI_API_TYPE`        | 是   | —                        | 模式开关。**区分大小写**，必须精确等于 `openai`。`OpenAI`、`openai `（带空格）都不会生效。          |
+| `GEMINI_OPENAI_BASE_URL` | 是   | `GOOGLE_GEMINI_BASE_URL` | 端点根地址。URL 没有路径时会自动补 `/v1`；已有路径则原样使用，所以需要 `/v1` 的端点请自己写全。     |
+| `GEMINI_OPENAI_API_KEY`  | 否   | `GEMINI_API_KEY`         | 以 `Authorization: Bearer` 头发送。为空时不发送该头，适用于无鉴权的本地服务。                       |
+| `GEMINI_OPENAI_MODELID`  | 是   | `GEMINI_MODEL`           | 发给端点的模型名。**这是权威来源（`GEMINI_MODEL` 仅为降级），`--model` 在此模式下无效。**           |
+| `GEMINI_OPENAI_HEADERS`  | 否   | —                        | 自定义请求头，JSON 对象。**可以覆盖任何内置头**（头名大小写不敏感），含 `Authorization`。详见下节。 |
+
+### 降级来源
+
+`GEMINI_OPENAI_*`
+未设置（或设为空串）时，会依次读取上表「降级来源」列里的变量。这让
+`GEMINI_OPENAI_*` 前缀出现之前写下的配置继续可用——只设过 `GEMINI_API_KEY` /
+`GOOGLE_GEMINI_BASE_URL` / `GEMINI_MODEL` 的用户不必为了切换后端而把值复制一份。
+
+```bash
+# 这两组配置等价
+export GEMINI_API_TYPE=openai
+export GEMINI_OPENAI_BASE_URL="https://api.example.com/v1"
+export GEMINI_OPENAI_API_KEY="YOUR_API_KEY"
+export GEMINI_OPENAI_MODELID="gpt-4o"
+
+export GEMINI_API_TYPE=openai
+export GOOGLE_GEMINI_BASE_URL="https://api.example.com/v1"
+export GEMINI_API_KEY="YOUR_API_KEY"
+export GEMINI_MODEL="gpt-4o"
+```
+
+两条规则：
+
+- **`GEMINI_OPENAI_*` 优先。**
+  两个都设置时用前者，降级只在它缺失或为空串时发生，所以降级永远盖不掉一个明确的 OpenAI 模式设置。
+- **空串算未设置。**
+  `export GEMINI_OPENAI_BASE_URL=`（清空继承来的变量）会走降级，而不是把空串当成一个刻意设置的空端点。
+
+> [!NOTE]
+>
+> `GEMINI_MODEL` 有双重身份：它同时是 CLI 内部的模型名来源。降级读取
+> `GEMINI_MODEL` 作为端点模型名时，这个值也会被 `setModel()`
+> 钉到内部状态，因此 UI 显示、遥测上报和实际发出的请求三者一致。
 
 ### 自定义请求头
 
@@ -166,21 +203,21 @@ geminiChat / baseLlmClient / contextManager / summarizer
 −3），另有 1 个生成物与 2 篇文档。全部是定点注入；**逐函数、逐行的修改点清单见
 [与上游合并升级指南](#与上游合并升级指南)**，下表只作索引：
 
-| 文件                                       | 改动                                                                             |
-| :----------------------------------------- | :------------------------------------------------------------------------------- |
-| `core/src/core/contentGenerator.ts`        | `AuthType.USE_OPENAI` 枚举、`getAuthTypeFromEnv`、认证类型解析函数、两个工厂分支 |
-| `core/src/config/config.ts`                | OpenAI 模式下把 `config.model` 固定为 `GEMINI_OPENAI_MODELID`                    |
-| `core/src/fallback/handler.ts`             | OpenAI 模式下禁用 Gemini 回退链                                                  |
-| `core/src/core/loggingContentGenerator.ts` | 遥测上报真实端点而非 Gemini 默认端点                                             |
-| `core/src/index.ts`                        | 导出新模块                                                                       |
-| `cli/src/config/auth.ts`                   | 校验 `BASE_URL` 与 `MODELID` 必填、`HEADERS` 可解析（API key 可空）              |
-| `cli/src/config/settingsSchema.ts`         | `security.auth.*` 的合法取值描述（文档由它生成）                                 |
-| `cli/src/validateNonInterActiveAuth.ts`    | 认证类型解析                                                                     |
-| `cli/src/core/initializer.ts`              | 启动鉴权与是否弹出认证对话框                                                     |
-| `cli/src/ui/auth/useAuth.ts`               | 交互模式自动认证                                                                 |
-| `cli/src/ui/auth/AuthDialog.tsx`           | 菜单项与默认选中                                                                 |
-| `cli/src/gemini.tsx`                       | `--list-sessions` 的尽力鉴权                                                     |
-| `cli/src/acp/acpSessionManager.ts`         | ACP 会话的两处认证类型解析                                                       |
+| 文件                                       | 改动                                                                                   |
+| :----------------------------------------- | :------------------------------------------------------------------------------------- |
+| `core/src/core/contentGenerator.ts`        | `AuthType.USE_OPENAI` 枚举、`getAuthTypeFromEnv`、认证类型解析函数、两个工厂分支       |
+| `core/src/config/config.ts`                | OpenAI 模式下把 `config.model` 固定为 `GEMINI_OPENAI_MODELID`（降级读 `GEMINI_MODEL`） |
+| `core/src/fallback/handler.ts`             | OpenAI 模式下禁用 Gemini 回退链                                                        |
+| `core/src/core/loggingContentGenerator.ts` | 遥测上报真实端点而非 Gemini 默认端点                                                   |
+| `core/src/index.ts`                        | 导出新模块                                                                             |
+| `cli/src/config/auth.ts`                   | 校验 `BASE_URL` 与 `MODELID` 必填、`HEADERS` 可解析（API key 可空）                    |
+| `cli/src/config/settingsSchema.ts`         | `security.auth.*` 的合法取值描述（文档由它生成）                                       |
+| `cli/src/validateNonInterActiveAuth.ts`    | 认证类型解析                                                                           |
+| `cli/src/core/initializer.ts`              | 启动鉴权与是否弹出认证对话框                                                           |
+| `cli/src/ui/auth/useAuth.ts`               | 交互模式自动认证                                                                       |
+| `cli/src/ui/auth/AuthDialog.tsx`           | 菜单项与默认选中                                                                       |
+| `cli/src/gemini.tsx`                       | `--list-sessions` 的尽力鉴权                                                           |
+| `cli/src/acp/acpSessionManager.ts`         | ACP 会话的两处认证类型解析                                                             |
 
 ### 请求路径
 
@@ -259,7 +296,8 @@ POST {BASE_URL}/chat/completions   (stream: true, stream_options.include_usage)
 
 ### 模型
 
-- `GEMINI_OPENAI_MODELID` 是唯一权威来源，`--model` 与 `GEMINI_MODEL`
+- 发给端点的模型名来自 `GEMINI_OPENAI_MODELID`，未设置时降级读
+  `GEMINI_MODEL`。两者都没有则报错。`--model`
   无效。CLI 内部仍以 Gemini 模型名推理（默认 `auto`），放行会把 `auto`
   发给端点。
 - 推理模型（`o1`、`o3`、`o4`、`gpt-5` 前缀）自动改用 `developer` 角色，并剥离
@@ -284,7 +322,8 @@ POST {BASE_URL}/chat/completions   (stream: true, stream_options.include_usage)
 - `countTokens` 使用本地估算（OpenAI 无对应端点）。调用方本就有估算兜底。
 - 音频、视频、PDF 的 `inlineData` 与 `fileData` 会被丢弃并记录 debug 日志。
 - `embedContent` 会把调用方给的模型名原样透传，不替换成 `GEMINI_OPENAI_MODELID`
-  （嵌入模型与对话模型通常不同）。目前 CLI 内没有任何生产代码调用该接口。
+  （降级读
+  `GEMINI_MODEL`）。只有调用方没给模型名时才用这个值填充。（嵌入模型与对话模型通常不同）。目前 CLI 内没有任何生产代码调用该接口。
 - Gemini 回退链（fallback）在 OpenAI 模式下禁用：链上每个候选都是 Gemini 模型，切换只会把错误变得更难懂。
 
 ### 遥测
@@ -298,8 +337,8 @@ OpenAI 流量在遥测中上报端点真实 host，不会像默认分支那样�
 
 | 现象                                                   | 原因与处理                                                                                                                                                   |
 | :----------------------------------------------------- | :----------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `must specify the GEMINI_OPENAI_BASE_URL`              | 变量没生效。检查是否写在不受信任工作区的项目 `.env` 里（会被白名单过滤），或改用 `export`。                                                                  |
-| `must specify the GEMINI_OPENAI_MODELID`               | 同上。该变量是必需的。                                                                                                                                       |
+| `must specify the GEMINI_OPENAI_BASE_URL`              | `GEMINI_OPENAI_BASE_URL` 和降级来源 `GOOGLE_GEMINI_BASE_URL` 都没生效。检查是否写在不受信任工作区的项目 `.env` 里（会被白名单过滤），或改用 `export`。       |
+| `must specify the GEMINI_OPENAI_MODELID`               | 同上。`GEMINI_OPENAI_MODELID` 与降级来源 `GEMINI_MODEL` 都没有。                                                                                             |
 | `HTTP 403: ... is only available on agentic harnesses` | **模型侧的门禁，不是本适配器的问题。** 详见下节。                                                                                                            |
 | 请求打到了 Google 而不是你的端点                       | settings.json 里的 `selectedType` 生效了。确认 `GEMINI_API_TYPE` 精确等于 `openai`，或检查是否被 `enforcedType` 拦下。                                       |
 | 本地服务连接失败，返回代理的错误页                     | 端点不是回环地址却在走代理；`config.proxy` 取自 `HTTPS_PROXY` 等变量。确认地址是 `localhost` / `127.0.0.1` / `::1`，或设置 `NO_PROXY`。                      |
@@ -449,10 +488,10 @@ http.createServer((req,res)=>{
 
 #### `packages/core/src/config/config.ts`（+13）
 
-| 位置            | 改动方式 | 内容                                                                                                                                                                                                             |
-| :-------------- | :------- | :--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 顶部 import     | 纯插入   | `OPENAI_MODEL_ID_ENV`、`readEnvValue`                                                                                                                                                                            |
-| `refreshAuth()` | 纯插入   | 在 `this.contentGeneratorConfig = newContentGeneratorConfig;` 之后，当 `authMethod === AuthType.USE_OPENAI` 时用 `GEMINI_OPENAI_MODELID` 调 `setModel()`（`isTemporary` 方式，不覆盖用户保存的 Gemini 模型设置） |
+| 位置            | 改动方式 | 内容                                                                                                                                                                                                                                                |
+| :-------------- | :------- | :-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 顶部 import     | 纯插入   | `OPENAI_MODEL_ID_ENV`、`readEnvValue`                                                                                                                                                                                                               |
+| `refreshAuth()` | 纯插入   | 在 `this.contentGeneratorConfig = newContentGeneratorConfig;` 之后，当 `authMethod === AuthType.USE_OPENAI` 时用 `readEnvWithFallback(GEMINI_OPENAI_MODELID, GEMINI_MODEL)` 调 `setModel()`（`isTemporary` 方式，不覆盖用户保存的 Gemini 模型设置） |
 
 #### `packages/core/src/core/loggingContentGenerator.ts`（+21 −3）
 
@@ -476,15 +515,15 @@ http.createServer((req,res)=>{
 
 #### `packages/cli/src/` 下的 7 处改动
 
-| 文件                            | 改动方式 | 内容                                                                                                                                                                                                                                                                |
-| :------------------------------ | :------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `config/auth.ts`                | 纯插入   | `validateAuthMethod()` 的 `USE_VERTEX_AI` 分支之后、末尾 `return 'Invalid auth method selected.'` 之前插入 `USE_OPENAI` 分支：校验 `GEMINI_OPENAI_BASE_URL` 与 `GEMINI_OPENAI_MODELID` 必填、`GEMINI_OPENAI_HEADERS` 可解析，**不校验 API key**（本地服务可无鉴权） |
-| `validateNonInterActiveAuth.ts` | 改既有行 | import 换成 `resolveAuthType`；`configuredAuthType \|\| getAuthTypeFromEnv()` → `resolveAuthType(configuredAuthType)`；错误提示串末尾补 `GEMINI_API_TYPE`                                                                                                           |
-| `core/initializer.ts`           | 改既有行 | `selectedType` → `getExplicitAuthType(selectedType)` 后再传给 `performInitialAuth`；`shouldOpenAuthDialog` 一并改用解析后的值                                                                                                                                       |
-| `ui/auth/useAuth.ts`            | 改既有行 | 交互模式取 `authType` 处改为 `getExplicitAuthType(...)`                                                                                                                                                                                                             |
-| `ui/auth/AuthDialog.tsx`        | 改既有行 | `items` 数组末尾新增 `OpenAI API (compatible)` 选项；`initialAuthIndex` 的 `selectedType` 判断改为 `getExplicitAuthType(...)`                                                                                                                                       |
-| `gemini.tsx`                    | 改既有行 | `--list-sessions` 的尽力鉴权处包一层 `getExplicitAuthType(...)`                                                                                                                                                                                                     |
-| `acp/acpSessionManager.ts`      | 改既有行 | 两处 `auth.selectedType \|\|` 包一层 `getExplicitAuthType(...)`                                                                                                                                                                                                     |
+| 文件                            | 改动方式 | 内容                                                                                                                                                                                                                                                                                                                  |
+| :------------------------------ | :------- | :-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `config/auth.ts`                | 纯插入   | `validateAuthMethod()` 的 `USE_VERTEX_AI` 分支之后、末尾 `return 'Invalid auth method selected.'` 之前插入 `USE_OPENAI` 分支：校验 `GEMINI_OPENAI_BASE_URL`（或 `GOOGLE_GEMINI_BASE_URL`）与 `GEMINI_OPENAI_MODELID`（或 `GEMINI_MODEL`）必填、`GEMINI_OPENAI_HEADERS` 可解析，**不校验 API key**（本地服务可无鉴权） |
+| `validateNonInterActiveAuth.ts` | 改既有行 | import 换成 `resolveAuthType`；`configuredAuthType \|\| getAuthTypeFromEnv()` → `resolveAuthType(configuredAuthType)`；错误提示串末尾补 `GEMINI_API_TYPE`                                                                                                                                                             |
+| `core/initializer.ts`           | 改既有行 | `selectedType` → `getExplicitAuthType(selectedType)` 后再传给 `performInitialAuth`；`shouldOpenAuthDialog` 一并改用解析后的值                                                                                                                                                                                         |
+| `ui/auth/useAuth.ts`            | 改既有行 | 交互模式取 `authType` 处改为 `getExplicitAuthType(...)`                                                                                                                                                                                                                                                               |
+| `ui/auth/AuthDialog.tsx`        | 改既有行 | `items` 数组末尾新增 `OpenAI API (compatible)` 选项；`initialAuthIndex` 的 `selectedType` 判断改为 `getExplicitAuthType(...)`                                                                                                                                                                                         |
+| `gemini.tsx`                    | 改既有行 | `--list-sessions` 的尽力鉴权处包一层 `getExplicitAuthType(...)`                                                                                                                                                                                                                                                       |
+| `acp/acpSessionManager.ts`      | 改既有行 | 两处 `auth.selectedType \|\|` 包一层 `getExplicitAuthType(...)`                                                                                                                                                                                                                                                       |
 
 这 7 处共用一个语义：**"用户是否显式选择了认证方式"的判定统一收敛到
 `getExplicitAuthType()`** —— `GEMINI_API_TYPE=openai` 算显式选择，环境里漂着的
