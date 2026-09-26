@@ -150,10 +150,10 @@ jobs:
 
   bundle:
     name: 'Build JS Bundle'
-    # The bundle is pure JS with no native modules, so one linux build serves
-    # every platform — it needs a Node runtime rather than a self-contained
-    # binary. Built once and shipped alongside the per-platform binaries, which
-    # is what the upstream release does.
+    # The bundle is JavaScript, so one linux build serves every platform — it
+    # needs a Node runtime rather than a self-contained binary. Built once and
+    # shipped alongside the per-platform binaries, which is what the upstream
+    # release does. Packaged from the single-file build (npm run bundle:single).
     runs-on: 'ubuntu-latest'
 
     steps:
@@ -172,7 +172,7 @@ jobs:
         run: 'npm ci'
 
       - name: 'Build Bundle'
-        run: 'npm run bundle'
+        run: 'npm run bundle:single'
 
       - name: 'Package Bundle'
         id: 'package'
@@ -182,16 +182,30 @@ jobs:
         run: |
           set -euo pipefail
 
-          chmod +x bundle/gemini.js
-          (cd bundle && zip -r "$RUNNER_TEMP/gemini-cli-bundle.zip" .)
+          # yoga-layout is the one dependency the single-file build leaves
+          # external: its entry point uses top-level await, which esbuild cannot
+          # inline once code splitting is off. Ship it inside the archive so the
+          # bundle still starts outside an npm install. The native dependencies
+          # (node-pty, keytar) stay lazily required and are only needed for a
+          # PTY or the keychain.
+          STAGE="$RUNNER_TEMP/gemini-cli-bundle"
+          rm -rf "$STAGE"
+          mkdir -p "$STAGE/node_modules"
+          cp -R bundle-single/. "$STAGE/"
+          cp -R node_modules/yoga-layout "$STAGE/node_modules/"
 
-          # Prove the archive is self-contained before publishing it.
-          rm -rf test-bundle
-          mkdir -p test-bundle
-          unzip -q "$RUNNER_TEMP/gemini-cli-bundle.zip" -d test-bundle
-          VERSION_OUT=$(node test-bundle/gemini.js --version)
+          chmod +x "$STAGE/gemini.mjs"
+          (cd "$STAGE" && zip -r "$RUNNER_TEMP/gemini-cli-bundle.zip" .)
+
+          # Prove the archive is self-contained before publishing it. Extract
+          # outside the repo on purpose: inside it, Node would resolve
+          # node_modules from the workspace and hide a missing dependency.
+          rm -rf "$RUNNER_TEMP/test-bundle"
+          mkdir -p "$RUNNER_TEMP/test-bundle"
+          unzip -q "$RUNNER_TEMP/gemini-cli-bundle.zip" -d "$RUNNER_TEMP/test-bundle"
+          VERSION_OUT=$(node "$RUNNER_TEMP/test-bundle/gemini.mjs" --version)
           echo "Bundle reports version: ${VERSION_OUT}"
-          rm -rf test-bundle
+          rm -rf "$RUNNER_TEMP/test-bundle"
 
           echo "asset=gemini-cli-bundle.zip" >> "$GITHUB_OUTPUT"
           ls -la "$RUNNER_TEMP/gemini-cli-bundle.zip"
