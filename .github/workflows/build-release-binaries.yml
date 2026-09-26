@@ -218,9 +218,54 @@ jobs:
           retention-days: 7
           if-no-files-found: 'error'
 
+  bundle-windows:
+    name: 'Verify JS Bundle on Windows'
+    # The bundle job builds once on linux and publishes the result for every
+    # platform. Nothing in that path proves the artifact is platform-neutral
+    # (the windows jobs elsewhere in this repo build on Windows before running,
+    # which is a different question), so run the release artifact itself here.
+    # Treated as a release gate: the release job waits for it.
+    needs: ['bundle']
+    runs-on: 'windows-latest'
+
+    steps:
+      - name: 'Checkout'
+        uses: 'actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8' # ratchet:actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: 'Set up Node.js'
+        uses: 'actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020' # ratchet:actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+
+      - name: 'Download JS bundle'
+        uses: 'actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0' # ratchet:actions/download-artifact@v5
+        with:
+          name: 'gemini-gemini-cli-bundle.zip'
+          path: '${{ runner.temp }}/artifact'
+
+      - name: 'Smoke Test Bundle'
+        shell: 'pwsh'
+        # Extracted outside the repository on purpose: inside it, Node would
+        # resolve node_modules from the workspace and hide a missing dependency.
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          $artifact = Join-Path (Join-Path $env:RUNNER_TEMP 'artifact') 'gemini-cli-bundle.zip'
+          $root = Join-Path $env:RUNNER_TEMP 'test-bundle'
+          Remove-Item -Recurse -Force $root -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force -Path $root | Out-Null
+
+          Expand-Archive -Path $artifact -DestinationPath $root
+
+          $version = & node (Join-Path $root 'gemini.mjs') --version
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Write-Host "Bundle reports version: $version"
+
   release:
     name: 'Publish Release'
-    needs: ['build', 'bundle']
+    needs: ['build', 'bundle', 'bundle-windows']
     runs-on: 'ubuntu-latest'
 
     steps:
