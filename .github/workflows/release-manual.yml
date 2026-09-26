@@ -1,54 +1,12 @@
 name: 'Release: Manual'
 
-# ── 触发器已禁用 ──────────────────────────────────────────
-# 本 fork 不使用 GitHub Actions。下方 on: 块已整体注释，
-# 工作流因此不会触发，也不消耗 Actions 额度。
-# 需要恢复时去掉本行与 on: 块的注释前缀即可。
-# ──────────────────────────────────────────────────────────
-# on:
-#   workflow_dispatch:
-#     inputs:
-#       version:
-#         description: 'The version to release (e.g., v0.1.11). Must be a valid semver string with a "v" prefix.'
-#         required: true
-#         type: 'string'
-#       ref:
-#         description: 'The branch, tag, or SHA to release from.'
-#         required: true
-#         type: 'string'
-#       npm_channel:
-#         description: 'The npm channel to publish to'
-#         required: true
-#         type: 'choice'
-#         options:
-#           - 'dev'
-#           - 'preview'
-#           - 'nightly'
-#           - 'latest'
-#         default: 'latest'
-#       dry_run:
-#         description: 'Run a dry-run of the release process; no branches, npm packages or GitHub releases will be created.'
-#         required: true
-#         type: 'boolean'
-#         default: true
-#       force_skip_tests:
-#         description: 'Select to skip the "Run Tests" step in testing. Prod releases should run tests'
-#         required: false
-#         type: 'boolean'
-#         default: false
-#       skip_github_release:
-#         description: 'Select to skip creating a GitHub release (only used when environment is PROD)'
-#         required: false
-#         type: 'boolean'
-#         default: false
-#       environment:
-#         description: 'Environment'
-#         required: false
-#         type: 'choice'
-#         options:
-#           - 'prod'
-#           - 'dev'
-#         default: 'prod'
+# 仅在 package 分支推送时触发。
+# 定时器（schedule）已移除：上游的 cron 会自行触发，与分支无关，
+# 正是本 fork 要避免的 Actions 额度消耗。
+on:
+  push:
+    branches:
+      - 'package'
 
 jobs:
   build-mac:

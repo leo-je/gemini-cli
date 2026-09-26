@@ -1,26 +1,12 @@
 name: 'PR Size Labeler (Batch)'
 
-# ── 触发器已禁用 ──────────────────────────────────────────
-# 本 fork 不使用 GitHub Actions。下方 on: 块已整体注释，
-# 工作流因此不会触发，也不消耗 Actions 额度。
-# 需要恢复时去掉本行与 on: 块的注释前缀即可。
-# ──────────────────────────────────────────────────────────
-# on:
-#   workflow_dispatch:
-#     inputs:
-#       process_all:
-#         description: 'Process all PRs (open and closed) or open only'
-#         required: true
-#         default: 'false'
-#         type: 'choice'
-#         options:
-#           - 'true'
-#           - 'false'
-#       limit:
-#         description: 'Max number of PRs to fetch and check'
-#         required: true
-#         default: '100'
-#         type: 'string'
+# 仅在 package 分支推送时触发。
+# 定时器（schedule）已移除：上游的 cron 会自行触发，与分支无关，
+# 正是本 fork 要避免的 Actions 额度消耗。
+on:
+  push:
+    branches:
+      - 'package'
 
 permissions:
   pull-requests: 'write'

@@ -11,21 +11,13 @@ name: 'Unassign Inactive Issue Assignees'
 # Maintainers, org members, and collaborators (anyone with write access or
 # above) are always exempted and will never be auto-unassigned.
 
-# ── 触发器已禁用 ──────────────────────────────────────────
-# 本 fork 不使用 GitHub Actions。下方 on: 块已整体注释，
-# 工作流因此不会触发，也不消耗 Actions 额度。
-# 需要恢复时去掉本行与 on: 块的注释前缀即可。
-# ──────────────────────────────────────────────────────────
-# on:
-#   schedule:
-#     - cron: '0 9 * * *' # Every day at 09:00 UTC
-#   workflow_dispatch:
-#     inputs:
-#       dry_run:
-#         description: 'Run in dry-run mode (no changes will be applied)'
-#         required: false
-#         default: false
-#         type: 'boolean'
+# 仅在 package 分支推送时触发。
+# 定时器（schedule）已移除：上游的 cron 会自行触发，与分支无关，
+# 正是本 fork 要避免的 Actions 额度消耗。
+on:
+  push:
+    branches:
+      - 'package'
 
 concurrency:
   group: '${{ github.workflow }}'

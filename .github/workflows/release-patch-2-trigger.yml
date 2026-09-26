@@ -5,56 +5,13 @@ run-name: >-
   ${{ github.event.pull_request.number && format('PR #{0}', github.event.pull_request.number) || 'Manual' }} |
   ${{ github.event.pull_request.head.ref || github.event.inputs.ref }}
 
-# ── 触发器已禁用 ──────────────────────────────────────────
-# 本 fork 不使用 GitHub Actions。下方 on: 块已整体注释，
-# 工作流因此不会触发，也不消耗 Actions 额度。
-# 需要恢复时去掉本行与 on: 块的注释前缀即可。
-# ──────────────────────────────────────────────────────────
-# on:
-#   pull_request:
-#     types:
-#       - 'closed'
-#     branches:
-#       - 'release/**'
-#   workflow_dispatch:
-#     inputs:
-#       ref:
-#         description: 'The head ref of the merged hotfix PR to trigger the release for (e.g. hotfix/v1.2.3/cherry-pick-abc).'
-#         required: true
-#         type: 'string'
-#       workflow_ref:
-#         description: 'The ref to checkout the workflow code from.'
-#         required: false
-#         type: 'string'
-#         default: 'main'
-#       workflow_id:
-#         description: 'The workflow to trigger. Defaults to release-patch-3-release.yml'
-#         required: false
-#         type: 'string'
-#         default: 'release-patch-3-release.yml'
-#       dry_run:
-#         description: 'Whether this is a dry run.'
-#         required: false
-#         type: 'boolean'
-#         default: false
-#       force_skip_tests:
-#         description: 'Select to skip the "Run Tests" step in testing. Prod releases should run tests'
-#         required: false
-#         type: 'boolean'
-#         default: false
-#       test_mode:
-#         description: 'Whether or not to run in test mode'
-#         required: false
-#         type: 'boolean'
-#         default: false
-#       environment:
-#         description: 'Environment'
-#         required: false
-#         type: 'choice'
-#         options:
-#           - 'prod'
-#           - 'dev'
-#         default: 'prod'
+# 仅在 package 分支推送时触发。
+# 定时器（schedule）已移除：上游的 cron 会自行触发，与分支无关，
+# 正是本 fork 要避免的 Actions 额度消耗。
+on:
+  push:
+    branches:
+      - 'package'
 
 jobs:
   trigger-patch-release:
