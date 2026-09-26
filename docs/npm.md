@@ -14,6 +14,9 @@ This bundle includes all of the package's dependencies, including
 with `npm install -g @google/gemini-cli` or runs it directly with
 `npx @google/gemini-cli`, they are using this single, self-contained executable.
 
+That bundle is a directory of code-split chunks. See
+[Single-file bundle](./single-file-bundle.md) for the alternative layout.
+
 ## `@google/gemini-cli-core`
 
 This package contains the core logic for interacting with the Gemini API. It is

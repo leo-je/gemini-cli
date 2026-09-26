@@ -24,7 +24,9 @@ import { glob } from 'glob';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = join(__dirname, '..');
-const bundleDir = join(root, 'bundle');
+// The single-file build collects the same assets next to bundle-single/gemini.mjs.
+const bundleDirName = process.env.BUNDLE_DIR || 'bundle';
+const bundleDir = join(root, bundleDirName);
 
 // Create the bundle directory if it doesn't exist
 if (!existsSync(bundleDir)) {
@@ -52,7 +54,9 @@ for (const file of policyFiles) {
   copyFileSync(join(root, file), join(policyDir, basename(file)));
 }
 
-console.log(`Copied ${policyFiles.length} policy files to bundle/policies/`);
+console.log(
+  `Copied ${policyFiles.length} policy files to ${bundleDirName}/policies/`,
+);
 
 // Also copy policies to a2a-server dist directory for bundled execution
 const a2aPolicyDir = join(root, 'packages/a2a-server/dist/policies');
@@ -71,7 +75,7 @@ const docsSrc = join(root, 'docs');
 const docsDest = join(bundleDir, 'docs');
 if (existsSync(docsSrc)) {
   cpSync(docsSrc, docsDest, { recursive: true, dereference: true });
-  console.log('Copied docs to bundle/docs/');
+  console.log(`Copied docs to ${bundleDirName}/docs/`);
 }
 
 // 4. Copy Built-in Skills (packages/core/src/skills/builtin)
@@ -82,7 +86,7 @@ if (existsSync(builtinSkillsSrc)) {
     recursive: true,
     dereference: true,
   });
-  console.log('Copied built-in skills to bundle/builtin/');
+  console.log(`Copied built-in skills to ${bundleDirName}/builtin/`);
 }
 
 // 5. Copy bundled chrome-devtools-mcp
@@ -96,7 +100,7 @@ if (!existsSync(bundleMcpSrc)) {
   process.exit(1);
 }
 cpSync(bundleMcpSrc, bundleMcpDest, { recursive: true, dereference: true });
-console.log('Copied bundled chrome-devtools-mcp to bundle/bundled/');
+console.log(`Copied bundled chrome-devtools-mcp to ${bundleDirName}/bundled/`);
 
 // 6. Copy Extension Examples
 const extensionExamplesSrc = join(
@@ -112,7 +116,7 @@ if (existsSync(extensionExamplesSrc)) {
     dereference: true,
     filter: (src) => !EXCLUDED_EXAMPLE_DIRS.some((dir) => src.includes(dir)),
   });
-  console.log('Copied extension examples to bundle/examples/');
+  console.log(`Copied extension examples to ${bundleDirName}/examples/`);
 }
 
-console.log('Assets copied to bundle/');
+console.log(`Assets copied to ${bundleDirName}/`);

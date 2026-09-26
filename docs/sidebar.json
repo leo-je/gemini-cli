@@ -228,7 +228,11 @@
             "slug": "docs/issue-and-pr-automation"
           },
           { "label": "Local development", "slug": "docs/local-development" },
-          { "label": "NPM package structure", "slug": "docs/npm" }
+          { "label": "NPM package structure", "slug": "docs/npm" },
+          {
+            "label": "Single-file bundle",
+            "slug": "docs/single-file-bundle"
+          }
         ]
       }
     ]
