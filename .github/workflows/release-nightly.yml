@@ -1,33 +1,38 @@
 name: 'Release: Nightly'
 
-on:
-  schedule:
-    - cron: '0 0 * * *'
-  workflow_dispatch:
-    inputs:
-      dry_run:
-        description: 'Run a dry-run of the release process; no branches, npm packages or GitHub releases will be created.'
-        required: true
-        type: 'boolean'
-        default: true
-      force_skip_tests:
-        description: 'Select to skip the "Run Tests" step in testing. Prod releases should run tests'
-        required: false
-        type: 'boolean'
-        default: true
-      ref:
-        description: 'The branch, tag, or SHA to release from.'
-        required: false
-        type: 'string'
-        default: 'main'
-      environment:
-        description: 'Environment'
-        required: false
-        type: 'choice'
-        options:
-          - 'prod'
-          - 'dev'
-        default: 'prod'
+# ── 触发器已禁用 ──────────────────────────────────────────
+# 本 fork 不使用 GitHub Actions。下方 on: 块已整体注释，
+# 工作流因此不会触发，也不消耗 Actions 额度。
+# 需要恢复时去掉本行与 on: 块的注释前缀即可。
+# ──────────────────────────────────────────────────────────
+# on:
+#   schedule:
+#     - cron: '0 0 * * *'
+#   workflow_dispatch:
+#     inputs:
+#       dry_run:
+#         description: 'Run a dry-run of the release process; no branches, npm packages or GitHub releases will be created.'
+#         required: true
+#         type: 'boolean'
+#         default: true
+#       force_skip_tests:
+#         description: 'Select to skip the "Run Tests" step in testing. Prod releases should run tests'
+#         required: false
+#         type: 'boolean'
+#         default: true
+#       ref:
+#         description: 'The branch, tag, or SHA to release from.'
+#         required: false
+#         type: 'string'
+#         default: 'main'
+#       environment:
+#         description: 'Environment'
+#         required: false
+#         type: 'choice'
+#         options:
+#           - 'prod'
+#           - 'dev'
+#         default: 'prod'
 
 jobs:
   build-mac:

@@ -2,14 +2,19 @@
 
 name: 'Agent Session Drift Check'
 
-on:
-  pull_request:
-    branches:
-      - 'main'
-      - 'release/**'
-    paths:
-      - 'packages/cli/src/nonInteractiveCli.ts'
-      - 'packages/cli/src/nonInteractiveCliAgentSession.ts'
+# ── 触发器已禁用 ──────────────────────────────────────────
+# 本 fork 不使用 GitHub Actions。下方 on: 块已整体注释，
+# 工作流因此不会触发，也不消耗 Actions 额度。
+# 需要恢复时去掉本行与 on: 块的注释前缀即可。
+# ──────────────────────────────────────────────────────────
+# on:
+#   pull_request:
+#     branches:
+#       - 'main'
+#       - 'release/**'
+#     paths:
+#       - 'packages/cli/src/nonInteractiveCli.ts'
+#       - 'packages/cli/src/nonInteractiveCliAgentSession.ts'
 
 concurrency:
   group: '${{ github.workflow }}-${{ github.head_ref || github.ref }}'

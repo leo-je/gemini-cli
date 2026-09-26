@@ -1,15 +1,20 @@
 name: '🔄 Gemini Scheduled Lifecycle Manager'
 
-on:
-  schedule:
-    - cron: '30 1 * * *' # Once a day
-  workflow_dispatch:
-    inputs:
-      dry_run:
-        description: 'Run in dry-run mode (no changes applied)'
-        required: false
-        default: false
-        type: 'boolean'
+# ── 触发器已禁用 ──────────────────────────────────────────
+# 本 fork 不使用 GitHub Actions。下方 on: 块已整体注释，
+# 工作流因此不会触发，也不消耗 Actions 额度。
+# 需要恢复时去掉本行与 on: 块的注释前缀即可。
+# ──────────────────────────────────────────────────────────
+# on:
+#   schedule:
+#     - cron: '30 1 * * *' # Once a day
+#   workflow_dispatch:
+#     inputs:
+#       dry_run:
+#         description: 'Run in dry-run mode (no changes applied)'
+#         required: false
+#         default: false
+#         type: 'boolean'
 
 concurrency:
   group: '${{ github.workflow }}'
