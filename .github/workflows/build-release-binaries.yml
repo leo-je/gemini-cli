@@ -149,12 +149,30 @@ jobs:
           if-no-files-found: 'error'
 
   bundle:
-    name: 'Build JS Bundle'
-    # The bundle is JavaScript, so one linux build serves every platform — it
-    # needs a Node runtime rather than a self-contained binary. Built once and
-    # shipped alongside the per-platform binaries, which is what the upstream
-    # release does. Packaged from the single-file build (npm run bundle:single).
-    runs-on: 'ubuntu-latest'
+    name: 'Build JS Bundle (${{ matrix.platform_name }})'
+    # Built per platform rather than once on linux, because the archive carries
+    # the native modules (@lydell/node-pty, @github/keytar): npm only installs
+    # the @lydell/node-pty-<platform>-<arch> subpackage matching the runner, and
+    # those .node binaries cannot be produced for another OS. Building and
+    # verifying on the same runner also settles "does a linux-built artifact run
+    # on Windows" by construction. The JavaScript itself is platform-neutral.
+    runs-on: '${{ matrix.os }}'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: 'ubuntu-latest'
+            platform_name: 'linux-x64'
+            arch: 'x64'
+          - os: 'windows-latest'
+            platform_name: 'win32-x64'
+            arch: 'x64'
+          - os: 'macos-latest' # Apple Silicon
+            platform_name: 'darwin-arm64'
+            arch: 'arm64'
+          - os: 'macos-latest' # Intel, running on ARM via Rosetta
+            platform_name: 'darwin-x64'
+            arch: 'x64'
 
     steps:
       - name: 'Checkout'
@@ -166,6 +184,9 @@ jobs:
         uses: 'actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020' # ratchet:actions/setup-node@v4
         with:
           node-version-file: '.nvmrc'
+          # Drives which @lydell/node-pty-<platform>-<arch> subpackage npm
+          # installs, so darwin-x64 gets x64 binaries even on an arm64 runner.
+          architecture: '${{ matrix.arch }}'
           cache: 'npm'
 
       - name: 'Install dependencies'
@@ -174,98 +195,123 @@ jobs:
       - name: 'Build Bundle'
         run: 'npm run bundle:single'
 
-      - name: 'Package Bundle'
-        id: 'package'
-        # zip is available on the ubuntu runner (it is not on windows-latest —
-        # see the binary job). Named without a platform suffix so it is
-        # recognisable as the cross-platform asset.
-        run: |
-          set -euo pipefail
-
-          # yoga-layout is the one dependency the single-file build leaves
-          # external: its entry point uses top-level await, which esbuild cannot
-          # inline once code splitting is off. Ship it inside the archive so the
-          # bundle still starts outside an npm install. The native dependencies
-          # (node-pty, keytar) stay lazily required and are only needed for a
-          # PTY or the keychain.
-          STAGE="$RUNNER_TEMP/gemini-cli-bundle"
-          rm -rf "$STAGE"
-          mkdir -p "$STAGE/node_modules"
-          cp -R bundle-single/. "$STAGE/"
-          cp -R node_modules/yoga-layout "$STAGE/node_modules/"
-
-          chmod +x "$STAGE/gemini.mjs"
-          (cd "$STAGE" && zip -r "$RUNNER_TEMP/gemini-cli-bundle.zip" .)
-
-          # Prove the archive is self-contained before publishing it. Extract
-          # outside the repo on purpose: inside it, Node would resolve
-          # node_modules from the workspace and hide a missing dependency.
-          rm -rf "$RUNNER_TEMP/test-bundle"
-          mkdir -p "$RUNNER_TEMP/test-bundle"
-          unzip -q "$RUNNER_TEMP/gemini-cli-bundle.zip" -d "$RUNNER_TEMP/test-bundle"
-          VERSION_OUT=$(node "$RUNNER_TEMP/test-bundle/gemini.mjs" --version)
-          echo "Bundle reports version: ${VERSION_OUT}"
-          rm -rf "$RUNNER_TEMP/test-bundle"
-
-          echo "asset=gemini-cli-bundle.zip" >> "$GITHUB_OUTPUT"
-          ls -la "$RUNNER_TEMP/gemini-cli-bundle.zip"
-
-      - name: 'Upload Artifact'
-        uses: 'actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02' # ratchet:actions/upload-artifact@v4
-        with:
-          name: 'gemini-${{ steps.package.outputs.asset }}'
-          path: '${{ runner.temp }}/${{ steps.package.outputs.asset }}'
-          retention-days: 7
-          if-no-files-found: 'error'
-
-  bundle-windows:
-    name: 'Verify JS Bundle on Windows'
-    # The bundle job builds once on linux and publishes the result for every
-    # platform. Nothing in that path proves the artifact is platform-neutral
-    # (the windows jobs elsewhere in this repo build on Windows before running,
-    # which is a different question), so run the release artifact itself here.
-    # Treated as a release gate: the release job waits for it.
-    needs: ['bundle']
-    runs-on: 'windows-latest'
-
-    steps:
-      - name: 'Checkout'
-        uses: 'actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8' # ratchet:actions/checkout@v5
-        with:
-          persist-credentials: false
-
-      - name: 'Set up Node.js'
-        uses: 'actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020' # ratchet:actions/setup-node@v4
-        with:
-          node-version-file: '.nvmrc'
-
-      - name: 'Download JS bundle'
-        uses: 'actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0' # ratchet:actions/download-artifact@v5
-        with:
-          name: 'gemini-gemini-cli-bundle.zip'
-          path: '${{ runner.temp }}/artifact'
-
-      - name: 'Smoke Test Bundle'
+      # Windows gets its own step for the same reason as the binary job below:
+      # Git Bash on the windows runner has no `zip` on PATH, while
+      # `Compress-Archive` ships with Windows and needs nothing installed.
+      - name: 'Package Bundle (Windows)'
+        id: 'package-win'
+        if: "matrix.os == 'windows-latest'"
         shell: 'pwsh'
-        # Extracted outside the repository on purpose: inside it, Node would
-        # resolve node_modules from the workspace and hide a missing dependency.
         run: |
           $ErrorActionPreference = 'Stop'
 
-          $artifact = Join-Path (Join-Path $env:RUNNER_TEMP 'artifact') 'gemini-cli-bundle.zip'
-          $root = Join-Path $env:RUNNER_TEMP 'test-bundle'
-          Remove-Item -Recurse -Force $root -ErrorAction SilentlyContinue
-          New-Item -ItemType Directory -Force -Path $root | Out-Null
+          $platform = '${{ matrix.platform_name }}'
+          $archive = "gemini-cli-bundle-$platform.zip"
+          $dest = Join-Path $env:RUNNER_TEMP $archive
 
-          Expand-Archive -Path $artifact -DestinationPath $root
+          # Stage the bundle with the node_modules it needs at runtime.
+          # yoga-layout is external because its entry point uses top-level
+          # await, which esbuild cannot inline without code splitting; the
+          # native modules cannot be bundled into JavaScript at all. Staged
+          # under RUNNER_TEMP so nothing lands inside the tree being packed.
+          $stage = Join-Path $env:RUNNER_TEMP 'stage'
+          Remove-Item -Recurse -Force $stage -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force -Path $stage | Out-Null
+          New-Item -ItemType Directory -Force -Path (Join-Path $stage 'node_modules') | Out-Null
+          # -LiteralPath throughout: the docs copied into the bundle are
+          # markdown files under names we do not control, and a '[' in one would
+          # be read as a wildcard class by the -Path variants.
+          Get-ChildItem -Path 'bundle-single' -Force |
+            ForEach-Object { Copy-Item -LiteralPath $_.FullName -Destination $stage -Recurse -Force }
+          foreach ($module in 'yoga-layout', '@lydell', '@github') {
+            Copy-Item -LiteralPath "node_modules/$module" -Destination (Join-Path $stage 'node_modules') -Recurse -Force
+          }
 
-          $version = & node (Join-Path $root 'gemini.mjs') --version
+          $staged = Get-ChildItem -Path $stage -Force | Select-Object -ExpandProperty FullName
+          Compress-Archive -LiteralPath $staged -DestinationPath $dest
+
+          # Verify the archive rather than the staging directory, unpacked
+          # outside the repository: inside it Node would resolve node_modules
+          # from the workspace and hide a missing dependency.
+          $test = Join-Path $env:RUNNER_TEMP 'test-bundle'
+          Remove-Item -Recurse -Force $test -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force -Path $test | Out-Null
+          Expand-Archive -Path $dest -DestinationPath $test
+
+          $version = & node (Join-Path $test 'gemini.mjs') --version
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           Write-Host "Bundle reports version: $version"
 
+          # `--version` never loads the native modules (the CLI requires them
+          # lazily), so check them explicitly.
+          & node scripts/verify-native-modules.js (Join-Path $test 'gemini.mjs')
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+          Remove-Item -Recurse -Force $test, $stage -ErrorAction SilentlyContinue
+
+          "asset=$archive" >> $env:GITHUB_OUTPUT
+          Get-Item $dest | Format-List Name, Length
+
+      - name: 'Package Bundle'
+        id: 'package'
+        if: "matrix.os != 'windows-latest'"
+        run: |
+          set -euo pipefail
+
+          PLATFORM="${{ matrix.platform_name }}"
+          ARCHIVE="gemini-cli-bundle-$PLATFORM.zip"
+
+          # Stage the bundle with the node_modules it needs at runtime.
+          # yoga-layout is external because its entry point uses top-level
+          # await, which esbuild cannot inline without code splitting; the
+          # native modules cannot be bundled into JavaScript at all. Staged
+          # under RUNNER_TEMP so nothing lands inside the tree being packed.
+          STAGE="$RUNNER_TEMP/stage"
+          rm -rf "$STAGE"
+          mkdir -p "$STAGE/node_modules"
+          cp -R bundle-single/. "$STAGE/"
+          for module in yoga-layout @lydell @github; do
+            cp -R "node_modules/$module" "$STAGE/node_modules/"
+          done
+
+          chmod +x "$STAGE/gemini.mjs"
+          (cd "$STAGE" && zip -q -r "$RUNNER_TEMP/$ARCHIVE" .)
+
+          # Verify the archive rather than the staging directory, unpacked
+          # outside the repository: inside it Node would resolve node_modules
+          # from the workspace and hide a missing dependency.
+          rm -rf "$RUNNER_TEMP/test-bundle"
+          mkdir -p "$RUNNER_TEMP/test-bundle"
+          unzip -q "$RUNNER_TEMP/$ARCHIVE" -d "$RUNNER_TEMP/test-bundle"
+          # Assigned before echoing: `echo "... $(node ...)"` would swallow a
+          # non-zero exit from node, which `set -e` cannot see through.
+          VERSION_OUT=$(node "$RUNNER_TEMP/test-bundle/gemini.mjs" --version)
+          echo "Bundle reports version: ${VERSION_OUT}"
+
+          # `--version` never loads the native modules (the CLI requires them
+          # lazily), so check them explicitly.
+          node scripts/verify-native-modules.js "$RUNNER_TEMP/test-bundle/gemini.mjs"
+
+          rm -rf "$RUNNER_TEMP/test-bundle" "$STAGE"
+
+          echo "asset=$ARCHIVE" >> "$GITHUB_OUTPUT"
+          ls -la "$RUNNER_TEMP/$ARCHIVE"
+
+      # Only one of the two packaging steps above runs per matrix entry, so the
+      # other step's outputs are empty. The `||` picks whichever was set.
+      - name: 'Upload Artifact'
+        uses: 'actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02' # ratchet:actions/upload-artifact@v4
+        with:
+          name: 'gemini-${{ steps.package-win.outputs.asset || steps.package.outputs.asset }}'
+          path: '${{ runner.temp }}/${{ steps.package-win.outputs.asset || steps.package.outputs.asset }}'
+          retention-days: 7
+          if-no-files-found: 'error'
+
   release:
     name: 'Publish Release'
-    needs: ['build', 'bundle', 'bundle-windows']
+    # Each bundle is now built and smoke tested on the platform it targets, so
+    # the cross-platform verification job that used to sit here is gone.
+    needs: ['build', 'bundle']
     runs-on: 'ubuntu-latest'
 
     steps:
