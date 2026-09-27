@@ -17,6 +17,7 @@ import { type LoadableSettingScope } from '../../config/settings.js';
 import type { AuthState } from '../types.js';
 import { type PermissionsDialogProps } from '../components/PermissionsModifyTrustDialog.js';
 import type { SessionInfo } from '../../utils/sessionUtils.js';
+import type { OpenAiEndpointEnv } from '../../utils/openAiEndpointEnv.js';
 import { type NewAgentsChoice } from '../components/NewAgentsNotification.js';
 import type { OverageMenuIntent, EmptyWalletIntent } from './UIStateContext.js';
 
@@ -76,6 +77,8 @@ export interface UIActions {
   popAllMessages: () => string | undefined;
   handleApiKeySubmit: (apiKey: string) => Promise<void>;
   handleApiKeyCancel: () => void;
+  handleOpenAiEndpointSubmit: (settings: OpenAiEndpointEnv) => Promise<void>;
+  handleOpenAiEndpointCancel: () => void;
   setBannerVisible: (visible: boolean) => void;
   setShortcutsHelpVisible: (visible: boolean) => void;
   setCleanUiDetailsVisible: (visible: boolean) => void;

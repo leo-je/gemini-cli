@@ -6,7 +6,7 @@
 
 import { AuthType } from '@google/gemini-cli-core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { validateAuthMethod } from './auth.js';
+import { isOpenAiEndpointConfigured, validateAuthMethod } from './auth.js';
 
 vi.mock('@google/gemini-cli-core', async (importOriginal) => {
   const actual =
@@ -154,5 +154,72 @@ describe('validateAuthMethod', () => {
       vi.stubEnv(key, value as string);
     }
     expect(await validateAuthMethod(authType)).toBe(expected);
+  });
+});
+
+describe('isOpenAiEndpointConfigured', () => {
+  beforeEach(() => {
+    vi.stubEnv('GEMINI_OPENAI_BASE_URL', undefined);
+    vi.stubEnv('GEMINI_OPENAI_MODELID', undefined);
+    vi.stubEnv('GOOGLE_GEMINI_BASE_URL', undefined);
+    vi.stubEnv('GEMINI_MODEL', undefined);
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  // The auth flow uses this to decide between prompting for the endpoint and
+  // showing the validation error, so it has to agree with validateAuthMethod
+  // about which combinations are usable.
+  it.each([
+    { description: 'nothing set', envs: {}, expected: false },
+    {
+      description: 'only a base URL',
+      envs: { GEMINI_OPENAI_BASE_URL: 'https://api.example/v1' },
+      expected: false,
+    },
+    {
+      description: 'only a model id',
+      envs: { GEMINI_OPENAI_MODELID: 'some-model' },
+      expected: false,
+    },
+    {
+      description: 'both OpenAI names',
+      envs: {
+        GEMINI_OPENAI_BASE_URL: 'https://api.example/v1',
+        GEMINI_OPENAI_MODELID: 'some-model',
+      },
+      expected: true,
+    },
+    {
+      description: 'the Gemini fallback names',
+      envs: {
+        GOOGLE_GEMINI_BASE_URL: 'https://api.example/v1',
+        GEMINI_MODEL: 'some-model',
+      },
+      expected: true,
+    },
+    {
+      description: 'an OpenAI name mixed with a fallback name',
+      envs: {
+        GEMINI_OPENAI_BASE_URL: 'https://api.example/v1',
+        GEMINI_MODEL: 'some-model',
+      },
+      expected: true,
+    },
+    {
+      description: 'empty strings, which count as unset',
+      envs: {
+        GEMINI_OPENAI_BASE_URL: '',
+        GEMINI_OPENAI_MODELID: '',
+      },
+      expected: false,
+    },
+  ])('returns $expected when there is $description', ({ envs, expected }) => {
+    for (const [key, value] of Object.entries(envs)) {
+      vi.stubEnv(key, value as string);
+    }
+    expect(isOpenAiEndpointConfigured()).toBe(expected);
   });
 });

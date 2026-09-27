@@ -40,6 +40,8 @@ export enum AuthState {
   Updating = 'updating',
   // Waiting for user to input API key
   AwaitingApiKeyInput = 'awaiting_api_key_input',
+  // Waiting for the endpoint settings OpenAI mode cannot run without
+  AwaitingOpenAiEndpoint = 'awaiting_openai_endpoint',
   // Successfully authenticated
   Authenticated = 'authenticated',
   // Waiting for the user to restart after a login

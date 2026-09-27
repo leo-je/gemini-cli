@@ -17,7 +17,10 @@ import {
 } from '@google/gemini-cli-core';
 import { getErrorMessage } from '@google/gemini-cli-core';
 import { AuthState } from '../types.js';
-import { validateAuthMethod } from '../../config/auth.js';
+import {
+  isOpenAiEndpointConfigured,
+  validateAuthMethod,
+} from '../../config/auth.js';
 
 export async function validateAuthMethodWithSettings(
   authType: AuthType,
@@ -115,6 +118,13 @@ export const useAuthCommand = (
           setAuthState(AuthState.AwaitingApiKeyInput);
           return;
         }
+      }
+
+      if (authType === AuthType.USE_OPENAI && !isOpenAiEndpointConfigured()) {
+        // OpenAI mode has nothing it can fall back on, so collect the endpoint
+        // here rather than sending the user away to edit `.env` by hand.
+        setAuthState(AuthState.AwaitingOpenAiEndpoint);
+        return;
       }
 
       const error = await validateAuthMethodWithSettings(

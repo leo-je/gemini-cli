@@ -19,6 +19,7 @@ import type { LoadedSettings } from '../../config/settings.js';
 // Mock dependencies
 const mockLoadApiKey = vi.fn();
 const mockValidateAuthMethod = vi.fn();
+const mockIsOpenAiEndpointConfigured = vi.fn();
 
 vi.mock('@google/gemini-cli-core', async (importOriginal) => {
   const actual =
@@ -31,6 +32,7 @@ vi.mock('@google/gemini-cli-core', async (importOriginal) => {
 
 vi.mock('../../config/auth.js', () => ({
   validateAuthMethod: (authType: AuthType) => mockValidateAuthMethod(authType),
+  isOpenAiEndpointConfigured: () => mockIsOpenAiEndpointConfigured(),
 }));
 
 describe('useAuth', () => {
@@ -190,6 +192,7 @@ describe('useAuth', () => {
     it('should authenticate without a selected type when GEMINI_API_TYPE=openai', async () => {
       process.env['GEMINI_API_TYPE'] = 'openai';
       mockValidateAuthMethod.mockResolvedValue(null);
+      mockIsOpenAiEndpointConfigured.mockReturnValue(true);
 
       const { result } = await renderHook(() =>
         useAuthCommand(createSettings(undefined), mockConfig),
@@ -202,6 +205,21 @@ describe('useAuth', () => {
         deferredRefreshAuth.resolve();
       });
       expect(result.current.authState).toBe(AuthState.Authenticated);
+    });
+
+    it('should collect the endpoint when OpenAI mode has none configured', async () => {
+      process.env['GEMINI_API_TYPE'] = 'openai';
+      mockIsOpenAiEndpointConfigured.mockReturnValue(false);
+
+      const { result } = await renderHook(() =>
+        useAuthCommand(createSettings(undefined), mockConfig),
+      );
+
+      // Prompting beats the validation error, which told a first-run user to go
+      // set an environment variable and left them nowhere to do it.
+      expect(result.current.authState).toBe(AuthState.AwaitingOpenAiEndpoint);
+      expect(result.current.authError).toBeNull();
+      expect(mockConfig.refreshAuth).not.toHaveBeenCalled();
     });
 
     it('should transition to AwaitingApiKeyInput if USE_GEMINI and no key found', async () => {

@@ -144,6 +144,10 @@ import {
 } from '../utils/cleanup.js';
 import { relaunchApp } from '../utils/processUtils.js';
 import type { SessionInfo } from '../utils/sessionUtils.js';
+import {
+  applyOpenAiEndpointEnv,
+  type OpenAiEndpointEnv,
+} from '../utils/openAiEndpointEnv.js';
 import { useMessageQueue } from './hooks/useMessageQueue.js';
 import { useMcpStatus } from './hooks/useMcpStatus.js';
 import { useApprovalModeIndicator } from './hooks/useApprovalModeIndicator.js';
@@ -876,6 +880,32 @@ Logging in with Google... Restarting Gemini CLI to continue.
   );
 
   const handleApiKeyCancel = useCallback(() => {
+    // Go back to auth method selection
+    setAuthState(AuthState.Updating);
+  }, [setAuthState]);
+
+  const handleOpenAiEndpointSubmit = useCallback(
+    async (endpoint: OpenAiEndpointEnv) => {
+      try {
+        onAuthError(null);
+        // Applies the values to this session as well as persisting them, so the
+        // refresh below sees them even when a project-level `.env` shadows the
+        // user-level file this writes to.
+        applyOpenAiEndpointEnv(endpoint);
+        await config.refreshAuth(AuthType.USE_OPENAI);
+        setAuthState(AuthState.Authenticated);
+      } catch (e) {
+        onAuthError(
+          `Failed to configure the OpenAI-compatible endpoint: ${
+            e instanceof Error ? e.message : String(e)
+          }`,
+        );
+      }
+    },
+    [setAuthState, onAuthError, config],
+  );
+
+  const handleOpenAiEndpointCancel = useCallback(() => {
     // Go back to auth method selection
     setAuthState(AuthState.Updating);
   }, [setAuthState]);
@@ -2205,6 +2235,7 @@ Logging in with Google... Restarting Gemini CLI to continue.
     !!emptyWalletRequest ||
     isSessionBrowserOpen ||
     authState === AuthState.AwaitingApiKeyInput ||
+    authState === AuthState.AwaitingOpenAiEndpoint ||
     isAwaitingLoginRestart ||
     !!newAgents;
 
@@ -2444,6 +2475,7 @@ Logging in with Google... Restarting Gemini CLI to continue.
       accountSuspensionInfo,
       isAuthDialogOpen,
       isAwaitingApiKeyInput: authState === AuthState.AwaitingApiKeyInput,
+      isAwaitingOpenAiEndpoint: authState === AuthState.AwaitingOpenAiEndpoint,
       isAwaitingLoginRestart,
       loginRestartMessage,
       apiKeyDefaultValue,
@@ -2718,6 +2750,8 @@ Logging in with Google... Restarting Gemini CLI to continue.
       popAllMessages,
       handleApiKeySubmit,
       handleApiKeyCancel,
+      handleOpenAiEndpointSubmit,
+      handleOpenAiEndpointCancel,
       setBannerVisible,
       setShortcutsHelpVisible,
       setCleanUiDetailsVisible,
@@ -2819,6 +2853,8 @@ Logging in with Google... Restarting Gemini CLI to continue.
       popAllMessages,
       handleApiKeySubmit,
       handleApiKeyCancel,
+      handleOpenAiEndpointSubmit,
+      handleOpenAiEndpointCancel,
       setBannerVisible,
       setShortcutsHelpVisible,
       setCleanUiDetailsVisible,

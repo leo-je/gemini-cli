@@ -4,8 +4,40 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { AuthType, loadApiKey, parseHeaderJson } from '@google/gemini-cli-core';
+import {
+  AuthType,
+  loadApiKey,
+  OPENAI_BASE_URL_ENV,
+  OPENAI_BASE_URL_FALLBACK_ENV,
+  OPENAI_MODEL_ID_ENV,
+  OPENAI_MODEL_ID_FALLBACK_ENV,
+  parseHeaderJson,
+} from '@google/gemini-cli-core';
 import { loadEnvironment, loadSettings } from './settings.js';
+
+/**
+ * Whether OpenAI mode has the settings it cannot run without.
+ *
+ * `validateAuthMethod` below reports each missing variable by name, which is
+ * what a user hand-editing `.env` wants. The auth flow calls this instead so it
+ * can collect them in the dialog: showing that error to a first-run user leaves
+ * them with no way to finish from inside the CLI. Like `validateAuthMethod`,
+ * it reloads `.env` first so a value just written is picked up without a
+ * restart.
+ */
+export function isOpenAiEndpointConfigured(): boolean {
+  loadEnvironment(loadSettings().merged, process.cwd());
+
+  const hasBaseUrl = Boolean(
+    process.env[OPENAI_BASE_URL_ENV] ||
+      process.env[OPENAI_BASE_URL_FALLBACK_ENV],
+  );
+  const hasModelId = Boolean(
+    process.env[OPENAI_MODEL_ID_ENV] ||
+      process.env[OPENAI_MODEL_ID_FALLBACK_ENV],
+  );
+  return hasBaseUrl && hasModelId;
+}
 
 export async function validateAuthMethod(
   authMethod: string,
