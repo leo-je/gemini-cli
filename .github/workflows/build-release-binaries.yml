@@ -205,8 +205,9 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
 
+          $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
           $platform = '${{ matrix.platform_name }}'
-          $archive = "gemini-cli-bundle-$platform.zip"
+          $archive = "gemini-cli-bundle-$platform-$version.zip"
           $dest = Join-Path $env:RUNNER_TEMP $archive
 
           # Stage the bundle with the node_modules it needs at runtime.
@@ -258,8 +259,9 @@ jobs:
         run: |
           set -euo pipefail
 
+          VERSION=$(node -p "require('./package.json').version")
           PLATFORM="${{ matrix.platform_name }}"
-          ARCHIVE="gemini-cli-bundle-$PLATFORM.zip"
+          ARCHIVE="gemini-cli-bundle-$PLATFORM-$VERSION.zip"
 
           # Stage the bundle with the node_modules it needs at runtime.
           # yoga-layout is external because its entry point uses top-level
