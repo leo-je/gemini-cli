@@ -537,6 +537,7 @@ export function buildGeminiResponse(
   parts: Part[],
   finishReason: FinishReason | undefined,
   usage: GenerateContentResponseUsageMetadata | undefined,
+  modelVersion?: string,
 ): GenerateContentResponse {
   const response = new GenerateContentResponse();
   const candidate: {
@@ -550,24 +551,36 @@ export function buildGeminiResponse(
   if (usage) {
     response.usageMetadata = usage;
   }
+  // The CLI reports whichever model served a request as
+  // `response.modelVersion || request.model`, so leaving this unset falls back
+  // to what the caller asked for. A sub-agent asks for a Gemini model name
+  // (e.g. `codebase_investigator` hardcodes a preview Flash model), which then
+  // shows up in the session stats even though this generator ignores it and
+  // sends the configured model id. Setting it here keeps the stats honest.
+  if (modelVersion) {
+    response.modelVersion = modelVersion;
+  }
   return response;
 }
 
 /**
  * Converts a complete (non-streamed) Chat Completion into a Gemini response.
  */
-export function toGeminiResponse(completion: {
-  choices?: Array<{
-    message?: {
-      content?: string | null;
-      reasoning_content?: string | null;
-      reasoning?: string | null;
-      tool_calls?: OpenAIResponseToolCall[];
-    };
-    finish_reason?: string | null;
-  }>;
-  usage?: OpenAIUsage | null;
-}): GenerateContentResponse {
+export function toGeminiResponse(
+  completion: {
+    choices?: Array<{
+      message?: {
+        content?: string | null;
+        reasoning_content?: string | null;
+        reasoning?: string | null;
+        tool_calls?: OpenAIResponseToolCall[];
+      };
+      finish_reason?: string | null;
+    }>;
+    usage?: OpenAIUsage | null;
+  },
+  modelVersion?: string,
+): GenerateContentResponse {
   const choice = completion.choices?.[0];
   const parts: Part[] = [];
 
@@ -585,6 +598,7 @@ export function toGeminiResponse(completion: {
     parts,
     toGeminiFinishReason(choice?.finish_reason),
     toGeminiUsage(completion.usage),
+    modelVersion,
   );
 }
 

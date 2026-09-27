@@ -451,6 +451,24 @@ describe('buildGeminiResponse', () => {
     expect(response.candidates?.[0]?.finishReason).toBeUndefined();
     expect(response.usageMetadata).toBeUndefined();
   });
+
+  it('carries the model that served the response', () => {
+    const response = buildGeminiResponse(
+      [text('hi')],
+      undefined,
+      undefined,
+      'gpt-4o',
+    );
+    expect(response.modelVersion).toBe('gpt-4o');
+  });
+
+  it('leaves modelVersion unset when the caller has none to report', () => {
+    // The CLI falls back to `request.model` in that case, which is the old
+    // behaviour and the reason this parameter is optional.
+    expect(
+      buildGeminiResponse([text('hi')], undefined, undefined).modelVersion,
+    ).toBeUndefined();
+  });
 });
 
 describe('toGeminiResponse', () => {

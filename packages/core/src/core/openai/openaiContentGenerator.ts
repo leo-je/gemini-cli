@@ -122,7 +122,7 @@ export class OpenAIContentGenerator implements ContentGenerator {
         502,
       );
     }
-    return toGeminiResponse(completion);
+    return toGeminiResponse(completion, modelId);
   }
 
   async generateContentStream(
@@ -138,7 +138,7 @@ export class OpenAIContentGenerator implements ContentGenerator {
       body,
       request.config?.abortSignal,
     );
-    return this.consumeStream(pending.response.body!, pending.release);
+    return this.consumeStream(pending.response.body!, pending.release, modelId);
   }
 
   /**
@@ -152,6 +152,7 @@ export class OpenAIContentGenerator implements ContentGenerator {
   private async *consumeStream(
     body: ReadableStream<Uint8Array>,
     release: () => void,
+    modelId: string,
   ): AsyncGenerator<GenerateContentResponse> {
     const pendingCalls = new Map<number, PartialToolCall>();
     let finishReason: FinishReason | undefined;
@@ -199,7 +200,7 @@ export class OpenAIContentGenerator implements ContentGenerator {
 
         if (parts.length > 0) {
           producedOutput = true;
-          yield buildGeminiResponse(parts, undefined, undefined);
+          yield buildGeminiResponse(parts, undefined, undefined, modelId);
         }
       }
     } finally {
@@ -224,7 +225,7 @@ export class OpenAIContentGenerator implements ContentGenerator {
       finishReason = FinishReason.STOP;
     }
 
-    yield buildGeminiResponse(toolCallParts, finishReason, usage);
+    yield buildGeminiResponse(toolCallParts, finishReason, usage, modelId);
   }
 
   /**

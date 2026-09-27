@@ -477,6 +477,51 @@ describe('OpenAIContentGenerator', () => {
     ).toBeUndefined();
   });
 
+  it('reports the configured model rather than the requested one', async () => {
+    // A sub-agent asks for a Gemini model name (`codebase_investigator` pins a
+    // preview Flash model) while the request body still carries the configured
+    // OpenAI id. The session stats read `response.modelVersion`, so without
+    // this the sub-agent's line in the stats shows a Gemini model that never
+    // ran.
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        jsonResponse({
+          choices: [{ message: { content: 'hi' }, finish_reason: 'stop' }],
+        }),
+      ),
+    );
+
+    const generator = makeGenerator({ GEMINI_OPENAI_MODELID: 'gpt-4o' });
+    const response = await generator.generateContent(
+      { ...baseRequest, model: 'gemini-3-flash-preview' },
+      'p',
+      LlmRole.SUBAGENT,
+    );
+
+    expect(response.modelVersion).toBe('gpt-4o');
+  });
+
+  it('reports the configured model on streamed chunks too', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        sseResponse([
+          dataFrame({
+            choices: [{ delta: { content: 'ok' }, finish_reason: 'stop' }],
+          }),
+        ]),
+      ),
+    );
+
+    const generator = makeGenerator({ GEMINI_OPENAI_MODELID: 'gpt-4o' });
+    const chunks = await collectChunks(
+      await generator.generateContentStream(baseRequest, 'p', LlmRole.SUBAGENT),
+    );
+
+    expect(chunks[0].modelVersion).toBe('gpt-4o');
+  });
+
   it('estimates token counts locally', async () => {
     const generator = makeGenerator({ GEMINI_OPENAI_MODELID: 'gpt-4o' });
     const response = await generator.countTokens({
