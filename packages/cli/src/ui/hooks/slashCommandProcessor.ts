@@ -71,7 +71,7 @@ interface SlashCommandProcessorActions {
   openPrivacyNotice: () => void;
   openSettingsDialog: () => void;
   openSessionBrowser: () => void;
-  openModelDialog: () => void;
+  openModelDialog: (openAiEndpoint?: string) => void;
   openVoiceModelDialog: () => void;
   openAgentConfigDialog: (
     name: string,
@@ -504,7 +504,13 @@ export const useSlashCommandProcessor = (
                       actions.openSettingsDialog();
                       return { type: 'handled' };
                     case 'model':
-                      actions.openModelDialog();
+                      // `/model list` reuses this dialog and passes the endpoint
+                      // as a prop, so no second dialog kind is needed.
+                      actions.openModelDialog(
+                        typeof result.props?.['openAiEndpoint'] === 'string'
+                          ? result.props['openAiEndpoint']
+                          : undefined,
+                      );
                       return { type: 'handled' };
                     case 'voice-model':
                       actions.openVoiceModelDialog();

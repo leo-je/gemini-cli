@@ -182,6 +182,73 @@ async function readResponseText(response: Response): Promise<string> {
   return decodeCompressedBody(bytes).toString('utf8');
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Reads the first string field that names a model, across the shapes the
+ * various gateways answer with.
+ *
+ * A type guard rather than an assertion so a malformed entry is simply skipped
+ * instead of being trusted into a string.
+ */
+function readModelId(entry: unknown): string | undefined {
+  if (typeof entry === 'string') return entry;
+  if (!isRecord(entry)) return undefined;
+  for (const key of ['id', 'model', 'name', 'slug', 'canonical_slug']) {
+    const value = entry[key];
+    if (typeof value === 'string' && value) return value;
+  }
+  return undefined;
+}
+
+/**
+ * Extracts model ids from a `/models` response body.
+ *
+ * The official shape is `{"object":"list","data":[{"id":"..."}]}`, but proxies
+ * implementing a partial dialect differ: some answer `{"models":[...]}`, some
+ * return a bare array, and some name the field differently again. Since the
+ * whole point of the call is to show the user what this particular endpoint
+ * serves, a shape that yields nothing is a failure worth reporting rather than
+ * silently returning an empty list.
+ */
+export function parseModelList(text: string): string[] {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    throw new OpenAIHttpError(
+      `OpenAI-compatible endpoint returned a non-JSON model list: ${formatErrorBody(text)}`,
+      200,
+      text || undefined,
+    );
+  }
+
+  const entries = Array.isArray(parsed)
+    ? parsed
+    : isRecord(parsed)
+      ? 'data' in parsed
+        ? parsed['data']
+        : parsed['models']
+      : undefined;
+
+  if (!Array.isArray(entries)) {
+    throw new OpenAIHttpError(
+      'OpenAI-compatible endpoint returned a model list without a "data" or "models" array.',
+      200,
+      text || undefined,
+    );
+  }
+
+  const ids: string[] = [];
+  for (const entry of entries) {
+    const id = readModelId(entry);
+    if (id && !ids.includes(id)) ids.push(id);
+  }
+  return ids;
+}
+
 /**
  * Builds an `OpenAIHttpError` from a failed response.
  *
@@ -404,6 +471,41 @@ export class OpenAICompatibleClient {
       return parsed as OpenAIEmbeddingResponse;
     } finally {
       release();
+    }
+  }
+
+  /**
+   * Lists the model ids the endpoint serves.
+   *
+   * `GET /models` is a GET rather than a POST, so it does not go through
+   * `post()` — that helper exists to attach a JSON body and reuse the headers
+   * timeout, and a listing request has neither.
+   */
+  async listModels(signal?: AbortSignal): Promise<string[]> {
+    const url = resolveEndpointUrl(this.baseUrl, '/models');
+    const bounded = buildBoundedSignal(signal, HEADERS_TIMEOUT_MS);
+    const options: FetchOptions = {
+      method: 'GET',
+      headers: this.buildHeaders('application/json'),
+      signal: bounded.signal,
+    };
+    if (this.dispatcher) {
+      options.dispatcher = this.dispatcher;
+    }
+
+    let response: Response;
+    try {
+      response = await fetch(url, options);
+      if (!response.ok) throw await toHttpError(response);
+    } catch (error) {
+      bounded.clear();
+      throw error;
+    }
+
+    try {
+      return parseModelList(await readResponseText(response));
+    } finally {
+      bounded.clear();
     }
   }
 }

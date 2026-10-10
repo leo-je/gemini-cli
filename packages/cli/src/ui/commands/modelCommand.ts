@@ -14,6 +14,7 @@ import {
   type SlashCommand,
 } from './types.js';
 import { MessageType } from '../types.js';
+import { isOpenAiBackend } from '../openai/index.js';
 
 const setModelCommand: SlashCommand = {
   name: 'set',
@@ -63,12 +64,45 @@ const manageModelCommand: SlashCommand = {
   },
 };
 
+const listModelsCommand: SlashCommand = {
+  name: 'list',
+  description: 'Choose from the models your OpenAI-compatible endpoint serves',
+  kind: CommandKind.BUILT_IN,
+  autoExecute: true,
+  action: async (context: CommandContext) => {
+    const config = context.services.agentContext?.config;
+    if (!config) return;
+
+    const baseUrl = config.getContentGeneratorConfig()?.baseUrl;
+    if (!isOpenAiBackend(config)) {
+      context.ui.addItem({
+        type: MessageType.INFO,
+        text: '/model list is only available in OpenAI-compatible mode. Use /model to pick a Gemini model.',
+      });
+      return;
+    }
+    if (!baseUrl) {
+      context.ui.addItem({
+        type: MessageType.ERROR,
+        text: 'No OpenAI-compatible endpoint is configured. Set GEMINI_OPENAI_BASE_URL.',
+      });
+      return;
+    }
+
+    return {
+      type: 'dialog',
+      dialog: 'model',
+      props: { openAiEndpoint: baseUrl },
+    };
+  },
+};
+
 export const modelCommand: SlashCommand = {
   name: 'model',
   description: 'Manage model configuration',
   kind: CommandKind.BUILT_IN,
   autoExecute: false,
-  subCommands: [manageModelCommand, setModelCommand],
+  subCommands: [manageModelCommand, listModelsCommand, setModelCommand],
   action: async (context: CommandContext, args: string) =>
     manageModelCommand.action!(context, args),
 };

@@ -43,6 +43,7 @@ function dataFrame(payload: unknown): string {
 function makeGenerator(
   env: Record<string, string> = {},
   configOverrides: Partial<ContentGeneratorConfig> = {},
+  activeModel?: string,
 ): OpenAIContentGenerator {
   const config: ContentGeneratorConfig = {
     authType: AuthType.USE_OPENAI,
@@ -50,7 +51,15 @@ function makeGenerator(
     baseUrl: 'https://example.test/v1',
     ...configOverrides,
   };
-  const gcConfig = { env } as unknown as Config;
+  // `getActiveModel` is what the CLI's own selection writes to; `model` mirrors
+  // it because the CLI treats the two as the same choice.
+  const gcConfig = {
+    env,
+    getActiveModel: () => activeModel ?? env['GEMINI_MODEL'] ?? 'gemini-3-pro',
+    get model() {
+      return activeModel ?? env['GEMINI_MODEL'] ?? 'gemini-3-pro';
+    },
+  } as unknown as Config;
   return new OpenAIContentGenerator(config, gcConfig);
 }
 
@@ -86,7 +95,7 @@ describe('OpenAIContentGenerator', () => {
     ).rejects.toThrow('GEMINI_OPENAI_MODELID');
   });
 
-  it('sends the configured model id, not the Gemini one', async () => {
+  it('sends the configured model id, not the requested Gemini one', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       sseResponse([
         dataFrame({
@@ -97,6 +106,7 @@ describe('OpenAIContentGenerator', () => {
     );
     vi.stubGlobal('fetch', fetchMock);
 
+    // `baseRequest.model` is `gemini-3-pro`; that must never reach the wire.
     const generator = makeGenerator({ GEMINI_OPENAI_MODELID: 'gpt-4o' });
     await collectChunks(
       await generator.generateContentStream(baseRequest, 'p', LlmRole.MAIN),
@@ -108,6 +118,135 @@ describe('OpenAIContentGenerator', () => {
     expect((init.headers as Record<string, string>)['Authorization']).toBe(
       'Bearer test-key',
     );
+  });
+
+  it('honors the CLI selection over the configured env id', async () => {
+    // `/model list` and `/model set` write to the config, not the environment.
+    // Without this the picker would change what the footer shows while every
+    // request still went to the env-configured model.
+    const fetchMock = vi.fn().mockResolvedValue(
+      sseResponse([
+        dataFrame({
+          choices: [{ delta: { content: 'hi' }, finish_reason: 'stop' }],
+        }),
+        'data: [DONE]\n\n',
+      ]),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const generator = makeGenerator(
+      { GEMINI_OPENAI_MODELID: 'thinkingmachines/inkling:free' },
+      {},
+      'anthropic/claude-haiku-5.5',
+    );
+    await collectChunks(
+      await generator.generateContentStream(baseRequest, 'p', LlmRole.MAIN),
+    );
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(JSON.parse(init.body as string).model).toBe(
+      'anthropic/claude-haiku-5.5',
+    );
+  });
+
+  it('picks up a model switch without rebuilding the generator', async () => {
+    // A fresh Response per call: a stream body can only be read once.
+    const fetchMock = vi.fn().mockImplementation(() =>
+      Promise.resolve(
+        sseResponse([
+          dataFrame({
+            choices: [{ delta: { content: 'hi' }, finish_reason: 'stop' }],
+          }),
+          'data: [DONE]\n\n',
+        ]),
+      ),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    // The generator is constructed once per session; the model is read per
+    // request, so a switch mid-session has to take effect immediately.
+    let active = 'model-a';
+    const config: ContentGeneratorConfig = {
+      authType: AuthType.USE_OPENAI,
+      apiKey: 'test-key',
+      baseUrl: 'https://example.test/v1',
+    };
+    const gcConfig = {
+      env: { GEMINI_OPENAI_MODELID: 'env-model' },
+      getActiveModel: () => active,
+    } as unknown as Config;
+    const generator = new OpenAIContentGenerator(config, gcConfig);
+
+    await collectChunks(
+      await generator.generateContentStream(baseRequest, 'p', LlmRole.MAIN),
+    );
+    active = 'model-b';
+    await collectChunks(
+      await generator.generateContentStream(baseRequest, 'p', LlmRole.MAIN),
+    );
+
+    const bodies = fetchMock.mock.calls.map(
+      ([, init]) => JSON.parse((init as RequestInit).body as string).model,
+    );
+    expect(bodies).toEqual(['model-a', 'model-b']);
+  });
+
+  it('falls back to the env id when the selection is a Gemini name', async () => {
+    // A choice made before switching backends, or a leftover default, must not
+    // be forwarded — the endpoint does not serve `gemini-*`.
+    const fetchMock = vi.fn().mockResolvedValue(
+      sseResponse([
+        dataFrame({
+          choices: [{ delta: { content: 'hi' }, finish_reason: 'stop' }],
+        }),
+        'data: [DONE]\n\n',
+      ]),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const generator = makeGenerator(
+      { GEMINI_OPENAI_MODELID: 'real-model' },
+      {},
+      'gemini-3-pro',
+    );
+    await collectChunks(
+      await generator.generateContentStream(baseRequest, 'p', LlmRole.MAIN),
+    );
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(JSON.parse(init.body as string).model).toBe('real-model');
+  });
+
+  it('falls back to the env id for the auto alias', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      sseResponse([
+        dataFrame({
+          choices: [{ delta: { content: 'hi' }, finish_reason: 'stop' }],
+        }),
+        'data: [DONE]\n\n',
+      ]),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const generator = makeGenerator(
+      { GEMINI_OPENAI_MODELID: 'real-model' },
+      {},
+      'auto',
+    );
+    await collectChunks(
+      await generator.generateContentStream(baseRequest, 'p', LlmRole.MAIN),
+    );
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(JSON.parse(init.body as string).model).toBe('real-model');
+  });
+
+  it('throws when there is neither a selection nor a configured id', async () => {
+    // With `auto` selected and no env id there is nothing valid to send.
+    const generator = makeGenerator({}, {}, 'auto');
+    await expect(
+      generator.generateContentStream(baseRequest, 'p', LlmRole.MAIN),
+    ).rejects.toThrow('GEMINI_OPENAI_MODELID');
   });
 
   it('sends headers configured through GEMINI_OPENAI_HEADERS', async () => {

@@ -56,6 +56,28 @@ import {
   readEnvValue,
   readEnvWithFallback,
 } from './constants.js';
+import { isAutoModel } from '../../config/models.js';
+
+/**
+ * Whether a model string is a Gemini name the endpoint will not recognize.
+ *
+ * The CLI resolves to Gemini names throughout (`auto`, `pro`, `flash`,
+ * `flash-lite`, `gemini-3-pro`, ...), so a selection made before switching to
+ * this backend would otherwise be sent straight to an OpenAI-compatible
+ * endpoint, which has never heard of it.
+ *
+ * Kept deliberately narrow — this is a safety net, not a catalog. Only names
+ * the CLI itself would produce are rejected; anything else is forwarded, since
+ * guessing wrong here would block a model the endpoint does serve. `gemma-` is
+ * included because a user running gemma through this backend expects it to
+ * work, and Ollama/vLLM serve it under that same name.
+ */
+function isGeminiModelName(model: string): boolean {
+  if (isAutoModel(model)) return true;
+  const bare = model.toLowerCase();
+  if (['pro', 'flash', 'flash-lite'].includes(bare)) return true;
+  return /^(gemini|gemma)-/i.test(model);
+}
 
 /** A partially accumulated `tool_calls` entry spread across stream deltas. */
 interface PartialToolCall {
@@ -67,8 +89,10 @@ interface PartialToolCall {
 export class OpenAIContentGenerator implements ContentGenerator {
   private readonly client: OpenAICompatibleClient;
   private readonly configuredModelId: string | undefined;
+  private readonly gcConfig: Config;
 
   constructor(config: ContentGeneratorConfig, gcConfig: Config) {
+    this.gcConfig = gcConfig;
     this.configuredModelId = readEnvWithFallback(
       OPENAI_MODEL_ID_ENV,
       OPENAI_MODEL_ID_FALLBACK_ENV,
@@ -90,19 +114,30 @@ export class OpenAIContentGenerator implements ContentGenerator {
   /**
    * Resolves the model to send to the endpoint.
    *
-   * The model id is authoritative and required, taken from
-   * `GEMINI_OPENAI_MODELID` or, failing that, `GEMINI_MODEL`. The rest of the
-   * CLI still reasons in Gemini model names, so letting `request.model` through
-   * would send something like `auto` or `gemini-3-pro` to an endpoint that has
-   * never heard of it. `--model` therefore has no effect in this mode.
+   * The CLI's own selection wins, so `/model list`, `/model set <name>`, and
+   * `--model` take effect without a restart. `GEMINI_OPENAI_MODELID` (or,
+   * failing that, `GEMINI_MODEL`) supplies the initial value and remains the
+   * fallback for a session that never chose one.
+   *
+   * A Gemini alias or model name is never forwarded: the rest of the CLI still
+   * reasons in Gemini names, so `auto` or `gemini-3-pro` would reach an endpoint
+   * that has never heard of it. Falling back to the configured id keeps the
+   * request one the endpoint can actually serve.
    */
   private resolveModelId(): string {
-    if (!this.configuredModelId) {
+    const configured = this.configuredModelId;
+    const selected = this.gcConfig.getActiveModel();
+
+    if (selected && !isAutoModel(selected) && !isGeminiModelName(selected)) {
+      return selected;
+    }
+
+    if (!configured) {
       throw new Error(
         `${OPENAI_MODEL_ID_ENV} (or ${OPENAI_MODEL_ID_FALLBACK_ENV}) must be set when GEMINI_API_TYPE=openai.`,
       );
     }
-    return this.configuredModelId;
+    return configured;
   }
 
   async generateContent(

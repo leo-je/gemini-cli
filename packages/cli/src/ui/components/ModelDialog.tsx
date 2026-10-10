@@ -32,13 +32,26 @@ import { useKeypress } from '../hooks/useKeypress.js';
 import { theme } from '../semantic-colors.js';
 import { DescriptiveRadioButtonSelect } from './shared/DescriptiveRadioButtonSelect.js';
 import { ConfigContext } from '../contexts/ConfigContext.js';
+import { OpenAiModelDialog } from '../openai/index.js';
 import { useSettings } from '../contexts/SettingsContext.js';
 
 interface ModelDialogProps {
   onClose: () => void;
+  /**
+   * When set, the dialog lists the models this OpenAI-compatible endpoint
+   * serves instead of the Gemini models.
+   *
+   * `/model list` passes the endpoint; `/model` leaves it undefined. Both
+   * arrive here rather than through separate dialogs so a second dialog — and
+   * the state, context, and wiring that would come with it — is not needed.
+   */
+  openAiEndpoint?: string;
 }
 
-export function ModelDialog({ onClose }: ModelDialogProps): React.JSX.Element {
+export function ModelDialog({
+  onClose,
+  openAiEndpoint,
+}: ModelDialogProps): React.JSX.Element {
   const config = useContext(ConfigContext);
   const settings = useSettings();
   const { terminalWidth } = useUIState();
@@ -345,6 +358,26 @@ export function ModelDialog({ onClose }: ModelDialogProps): React.JSX.Element {
     },
     [config, onClose, persistMode],
   );
+
+  // `/model list`: the endpoint's own catalog, not the compiled-in Gemini list.
+  // Returned before any Gemini-specific state below is rendered, but after the
+  // hooks above — hook order stays stable across the two modes.
+  if (openAiEndpoint) {
+    return (
+      <OpenAiModelDialog
+        endpoint={openAiEndpoint}
+        onClose={onClose}
+        onSelect={(modelId) => {
+          if (config) {
+            config.setModel(modelId, persistMode ? false : true);
+            const event = new ModelSlashCommandEvent(modelId);
+            logModelSlashCommand(config, event);
+          }
+          onClose();
+        }}
+      />
+    );
+  }
 
   return (
     <Box

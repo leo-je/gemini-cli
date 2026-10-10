@@ -15,7 +15,7 @@ import { AuthInProgress } from '../auth/AuthInProgress.js';
 import { AuthDialog } from '../auth/AuthDialog.js';
 import { BannedAccountDialog } from '../auth/BannedAccountDialog.js';
 import { ApiAuthDialog } from '../auth/ApiAuthDialog.js';
-import { OpenAiEndpointDialog } from '../auth/OpenAiEndpointDialog.js';
+import { OpenAiEndpointDialog } from '../openai/index.js';
 import { EditorSettingsDialog } from './EditorSettingsDialog.js';
 import { PrivacyNotice } from '../privacy/PrivacyNotice.js';
 import { ProQuotaDialog } from './ProQuotaDialog.js';
@@ -240,7 +240,14 @@ export const DialogManager = ({
     );
   }
   if (uiState.isModelDialogOpen) {
-    return <ModelDialog onClose={uiActions.closeModelDialog} />;
+    // `openAiModelEndpoint` is set by `/model list`; `/model` leaves it
+    // undefined and gets the Gemini list.
+    return (
+      <ModelDialog
+        onClose={uiActions.closeModelDialog}
+        openAiEndpoint={uiState.openAiModelEndpoint}
+      />
+    );
   }
   if (uiState.isVoiceModelDialogOpen) {
     return <VoiceModelDialog onClose={uiActions.closeVoiceModelDialog} />;

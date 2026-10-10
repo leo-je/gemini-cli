@@ -17,7 +17,7 @@ import { type LoadableSettingScope } from '../../config/settings.js';
 import type { AuthState } from '../types.js';
 import { type PermissionsDialogProps } from '../components/PermissionsModifyTrustDialog.js';
 import type { SessionInfo } from '../../utils/sessionUtils.js';
-import type { OpenAiEndpointEnv } from '../../utils/openAiEndpointEnv.js';
+import type { OpenAiEndpointEnv } from '../openai/index.js';
 import { type NewAgentsChoice } from '../components/NewAgentsNotification.js';
 import type { OverageMenuIntent, EmptyWalletIntent } from './UIStateContext.js';
 

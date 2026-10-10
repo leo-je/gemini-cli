@@ -8,7 +8,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { modelCommand } from './modelCommand.js';
 import { type CommandContext } from './types.js';
 import { createMockCommandContext } from '../../test-utils/mockCommandContext.js';
-import type { Config } from '@google/gemini-cli-core';
+import { AuthType, type Config } from '@google/gemini-cli-core';
 import { MessageType } from '../types.js';
 
 describe('modelCommand', () => {
@@ -165,6 +165,81 @@ describe('modelCommand', () => {
         expect.objectContaining({
           type: MessageType.ERROR,
           text: expect.stringContaining('Usage: /model set <model-name>'),
+        }),
+      );
+    });
+  });
+
+  describe('list subcommand', () => {
+    function configWith(
+      generatorConfig: Record<string, unknown> | undefined,
+    ): CommandContext['services']['agentContext'] {
+      return {
+        getContentGeneratorConfig: vi.fn().mockReturnValue(generatorConfig),
+        get config() {
+          return this;
+        },
+      } as unknown as Config;
+    }
+
+    it('should open the picker with the configured endpoint', async () => {
+      const listCommand = modelCommand.subCommands?.find(
+        (c) => c.name === 'list',
+      );
+      expect(listCommand).toBeDefined();
+
+      mockContext.services.agentContext = configWith({
+        authType: AuthType.USE_OPENAI,
+        baseUrl: 'https://openrouter.ai/api/v1',
+      });
+
+      const result = await listCommand!.action!(mockContext, '');
+
+      // Reuses the `model` dialog with an endpoint prop rather than adding a
+      // second dialog kind, so `/model` and `/model list` share one entry point.
+      expect(result).toEqual({
+        type: 'dialog',
+        dialog: 'model',
+        props: { openAiEndpoint: 'https://openrouter.ai/api/v1' },
+      });
+    });
+
+    it('should decline outside OpenAI-compatible mode', async () => {
+      const listCommand = modelCommand.subCommands?.find(
+        (c) => c.name === 'list',
+      );
+
+      mockContext.services.agentContext = configWith({
+        authType: AuthType.USE_GEMINI,
+      });
+
+      const result = await listCommand!.action!(mockContext, '');
+
+      expect(result).toBeUndefined();
+      expect(mockContext.ui.addItem).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: MessageType.INFO,
+          text: expect.stringContaining('only available in OpenAI'),
+        }),
+      );
+    });
+
+    it('should error when OpenAI mode has no endpoint configured', async () => {
+      const listCommand = modelCommand.subCommands?.find(
+        (c) => c.name === 'list',
+      );
+
+      mockContext.services.agentContext = configWith({
+        authType: AuthType.USE_OPENAI,
+      });
+
+      const result = await listCommand!.action!(mockContext, '');
+
+      expect(result).toBeUndefined();
+      expect(mockContext.ui.addItem).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: MessageType.ERROR,
+          text: expect.stringContaining('GEMINI_OPENAI_BASE_URL'),
         }),
       );
     });

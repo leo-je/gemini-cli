@@ -537,6 +537,56 @@ describe('useSlashCommandProcessor', () => {
         },
       );
 
+      it('should forward the OpenAI endpoint to the model dialog', async () => {
+        // `/model list` reuses the model dialog; without this the endpoint
+        // would be dropped and the dialog would show Gemini models.
+        const commandName = 'modellistcmd';
+        const command = createTestCommand({
+          name: commandName,
+          action: vi.fn().mockResolvedValue({
+            type: 'dialog',
+            dialog: 'model',
+            props: { openAiEndpoint: 'https://openrouter.ai/api/v1' },
+          }),
+        });
+        const result = await setupProcessorHook({
+          builtinCommands: [command],
+        });
+        await waitFor(() =>
+          expect(result.current.slashCommands).toHaveLength(1),
+        );
+
+        await act(async () => {
+          await result.current.handleSlashCommand(`/${commandName}`);
+        });
+
+        expect(mockOpenModelDialog).toHaveBeenCalledWith(
+          'https://openrouter.ai/api/v1',
+        );
+      });
+
+      it('should open the model dialog with no endpoint by default', async () => {
+        const commandName = 'modelplaincmd';
+        const command = createTestCommand({
+          name: commandName,
+          action: vi
+            .fn()
+            .mockResolvedValue({ type: 'dialog', dialog: 'model' }),
+        });
+        const result = await setupProcessorHook({
+          builtinCommands: [command],
+        });
+        await waitFor(() =>
+          expect(result.current.slashCommands).toHaveLength(1),
+        );
+
+        await act(async () => {
+          await result.current.handleSlashCommand(`/${commandName}`);
+        });
+
+        expect(mockOpenModelDialog).toHaveBeenCalledWith(undefined);
+      });
+
       it('should handle "dialog: agentConfig" action with props', async () => {
         const mockOpenAgentConfigDialog = vi.fn();
         const agentDefinition = { name: 'test-agent' };

@@ -147,7 +147,7 @@ import type { SessionInfo } from '../utils/sessionUtils.js';
 import {
   applyOpenAiEndpointEnv,
   type OpenAiEndpointEnv,
-} from '../utils/openAiEndpointEnv.js';
+} from './openai/index.js';
 import { useMessageQueue } from './hooks/useMessageQueue.js';
 import { useMcpStatus } from './hooks/useMcpStatus.js';
 import { useApprovalModeIndicator } from './hooks/useApprovalModeIndicator.js';
@@ -975,8 +975,12 @@ Logging in with Google... Restarting Gemini CLI to continue.
     onAuthError,
   ]);
 
-  const { isModelDialogOpen, openModelDialog, closeModelDialog } =
-    useModelCommand();
+  const {
+    isModelDialogOpen,
+    openAiModelEndpoint,
+    openModelDialog,
+    closeModelDialog,
+  } = useModelCommand();
 
   const {
     isVoiceModelDialogOpen,
@@ -2508,6 +2512,7 @@ Logging in with Google... Restarting Gemini CLI to continue.
       isSettingsDialogOpen,
       isSessionBrowserOpen,
       isModelDialogOpen,
+      openAiModelEndpoint,
       isVoiceModelDialogOpen,
       isAgentConfigDialogOpen,
       selectedAgentName,
@@ -2622,6 +2627,7 @@ Logging in with Google... Restarting Gemini CLI to continue.
       isSettingsDialogOpen,
       isSessionBrowserOpen,
       isModelDialogOpen,
+      openAiModelEndpoint,
       isVoiceModelDialogOpen,
       isAgentConfigDialogOpen,
       selectedAgentName,

@@ -11,7 +11,7 @@ import { theme } from '../semantic-colors.js';
 import { TextInput } from '../components/shared/TextInput.js';
 import { useTextBuffer } from '../components/shared/text-buffer.js';
 import { useUIState } from '../contexts/UIStateContext.js';
-import type { OpenAiEndpointEnv } from '../../utils/openAiEndpointEnv.js';
+import type { OpenAiEndpointEnv } from './openAiEndpointEnv.js';
 
 /**
  * Collects the endpoint settings OpenAI mode needs.

@@ -116,6 +116,11 @@ export interface UIState {
   isSettingsDialogOpen: boolean;
   isSessionBrowserOpen: boolean;
   isModelDialogOpen: boolean;
+  /**
+   * Set by `/model list` to show the OpenAI-compatible endpoint's catalog
+   * instead of the Gemini models. Undefined for `/model`.
+   */
+  openAiModelEndpoint?: string;
   isVoiceModelDialogOpen: boolean;
   isAgentConfigDialogOpen: boolean;
   selectedAgentName?: string;

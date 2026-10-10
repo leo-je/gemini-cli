@@ -112,6 +112,7 @@ describe('<ModelDialog />', () => {
   const renderComponent = async (
     configValue = mockConfig as Config,
     authType = AuthType.LOGIN_WITH_GOOGLE,
+    openAiEndpoint?: string,
   ) => {
     const settings = createMockSettings({
       security: {
@@ -122,7 +123,7 @@ describe('<ModelDialog />', () => {
     });
 
     const result = await renderWithProviders(
-      <ModelDialog onClose={mockOnClose} />,
+      <ModelDialog onClose={mockOnClose} openAiEndpoint={openAiEndpoint} />,
       {
         config: configValue,
         settings,
@@ -467,6 +468,111 @@ describe('<ModelDialog />', () => {
       const output = lastFrame();
       expect(output).not.toContain(PREVIEW_GEMINI_FLASH_LITE_MODEL);
       expect(output).toContain(DEFAULT_GEMINI_FLASH_LITE_MODEL);
+      unmount();
+    });
+  });
+
+  describe('OpenAI-compatible endpoint listing', () => {
+    beforeEach(() => {
+      mockGetProModelNoAccessSync.mockReturnValue(false);
+      mockGetProModelNoAccess.mockResolvedValue(false);
+    });
+
+    it('shows the endpoint catalog instead of the Gemini models', async () => {
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValue(
+          new Response(
+            JSON.stringify({ data: [{ id: 'anthropic/claude-haiku-5.5' }] }),
+            { status: 200 },
+          ),
+        );
+      vi.stubGlobal('fetch', fetchMock);
+
+      const config = {
+        ...mockConfig,
+        getContentGeneratorConfig: () => ({
+          authType: AuthType.USE_OPENAI,
+          baseUrl: 'https://openrouter.ai/api/v1',
+        }),
+      } as unknown as Config;
+
+      const { lastFrame, waitUntilReady, unmount } = await renderComponent(
+        config,
+        AuthType.USE_OPENAI,
+        'https://openrouter.ai/api/v1',
+      );
+      await waitUntilReady();
+
+      const output = lastFrame();
+      expect(output).toContain('Select Model');
+      expect(output).toContain('https://openrouter.ai/api/v1');
+      expect(output).toContain('anthropic/claude-haiku-5.5');
+      // The Gemini-only affordances must not render in this mode.
+      expect(output).not.toContain('Manual');
+      expect(output).not.toContain(DEFAULT_GEMINI_MODEL);
+
+      vi.unstubAllGlobals();
+      unmount();
+    });
+
+    it('explains an empty catalog instead of rendering a blank list', async () => {
+      vi.stubGlobal(
+        'fetch',
+        vi
+          .fn()
+          .mockResolvedValue(
+            new Response(JSON.stringify({ models: [] }), { status: 200 }),
+          ),
+      );
+
+      const config = {
+        ...mockConfig,
+        getContentGeneratorConfig: () => ({
+          authType: AuthType.USE_OPENAI,
+          baseUrl: 'http://127.0.0.1:15721',
+        }),
+      } as unknown as Config;
+
+      const { lastFrame, waitUntilReady, unmount } = await renderComponent(
+        config,
+        AuthType.USE_OPENAI,
+        'http://127.0.0.1:15721',
+      );
+      await waitUntilReady();
+
+      const output = lastFrame();
+      expect(output).toContain('returned no models');
+      expect(output).toContain('/model set');
+
+      vi.unstubAllGlobals();
+      unmount();
+    });
+
+    it('reports a failing endpoint with its reason', async () => {
+      vi.stubGlobal(
+        'fetch',
+        vi.fn().mockResolvedValue(new Response('bad key', { status: 401 })),
+      );
+
+      const config = {
+        ...mockConfig,
+        getContentGeneratorConfig: () => ({
+          authType: AuthType.USE_OPENAI,
+          baseUrl: 'https://example.test/v1',
+        }),
+      } as unknown as Config;
+
+      const { lastFrame, waitUntilReady, unmount } = await renderComponent(
+        config,
+        AuthType.USE_OPENAI,
+        'https://example.test/v1',
+      );
+      await waitUntilReady();
+
+      expect(lastFrame()).toContain('Could not list models');
+
+      vi.unstubAllGlobals();
       unmount();
     });
   });

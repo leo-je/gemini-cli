@@ -9,6 +9,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import {
   OpenAICompatibleClient,
   OpenAIHttpError,
+  parseModelList,
   parseSseStream,
   resolveEndpointUrl,
 } from './openaiClient.js';
@@ -421,5 +422,131 @@ describe('OpenAICompatibleClient', () => {
     await expect(
       client.startChatCompletionStream({ model: 'm', messages: [] }),
     ).rejects.toMatchObject({ status: 503 });
+  });
+});
+
+describe('parseModelList', () => {
+  it('reads the official {data:[{id}]} shape', () => {
+    expect(
+      parseModelList(
+        JSON.stringify({
+          object: 'list',
+          data: [{ id: 'a' }, { id: 'b' }],
+        }),
+      ),
+    ).toEqual(['a', 'b']);
+  });
+
+  it('reads the {models:[...]} shape a local proxy answers with', () => {
+    expect(parseModelList(JSON.stringify({ models: ['x', 'y'] }))).toEqual([
+      'x',
+      'y',
+    ]);
+  });
+
+  it('reads a bare array of ids', () => {
+    expect(parseModelList(JSON.stringify(['x', 'y']))).toEqual(['x', 'y']);
+  });
+
+  it('falls back through the naming fields gateways disagree on', () => {
+    expect(
+      parseModelList(
+        JSON.stringify({
+          data: [
+            { id: 'first' },
+            { model: 'second' },
+            { name: 'third' },
+            { slug: 'fourth' },
+            { canonical_slug: 'fifth' },
+          ],
+        }),
+      ),
+    ).toEqual(['first', 'second', 'third', 'fourth', 'fifth']);
+  });
+
+  it('deduplicates ids', () => {
+    expect(
+      parseModelList(JSON.stringify({ data: [{ id: 'a' }, { id: 'a' }] })),
+    ).toEqual(['a']);
+  });
+
+  it('skips entries that name no model', () => {
+    expect(
+      parseModelList(
+        JSON.stringify({ data: [{ id: 'a' }, {}, null, 42, { id: '' }] }),
+      ),
+    ).toEqual(['a']);
+  });
+
+  it('reports a body with no recognisable list rather than returning empty', () => {
+    // An empty list is indistinguishable from a broken one at the call site, so
+    // an unrecognized shape has to surface.
+    expect(() => parseModelList(JSON.stringify({ object: 'list' }))).toThrow(
+      /without a "data" or "models" array/,
+    );
+  });
+
+  it('reports a non-JSON body', () => {
+    expect(() => parseModelList('<html>502</html>')).toThrow(/non-JSON/);
+  });
+
+  it('returns an empty list for a genuinely empty one', () => {
+    expect(parseModelList(JSON.stringify({ models: [] }))).toEqual([]);
+  });
+});
+
+describe('listModels', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('issues a GET to /models and returns the ids', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ data: [{ id: 'a' }, { id: 'b' }] }), {
+        status: 200,
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const models = await new OpenAICompatibleClient({
+      baseUrl: 'https://openrouter.ai/api/v1',
+      apiKey: 'k',
+    }).listModels();
+
+    expect(models).toEqual(['a', 'b']);
+    expect(fetchMock.mock.calls[0][0]).toBe(
+      'https://openrouter.ai/api/v1/models',
+    );
+    expect((fetchMock.mock.calls[0][1] as RequestInit).method).toBe('GET');
+  });
+
+  it('appends /v1 to a bare origin', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ data: [] }), {
+        status: 200,
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await new OpenAICompatibleClient({
+      baseUrl: 'http://localhost:11434',
+      apiKey: '',
+    }).listModels();
+
+    expect(fetchMock.mock.calls[0][0]).toBe('http://localhost:11434/v1/models');
+  });
+
+  it('surfaces a failing status with its body', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(new Response('no such route', { status: 404 })),
+    );
+
+    await expect(
+      new OpenAICompatibleClient({
+        baseUrl: 'https://example.test/v1',
+        apiKey: 'k',
+      }).listModels(),
+    ).rejects.toMatchObject({ status: 404 });
   });
 });
