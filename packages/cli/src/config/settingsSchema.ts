@@ -3119,6 +3119,13 @@ export const SETTINGS_SCHEMA_DEFINITIONS: Record<
         type: 'object',
         description: 'OAuth configuration for authenticating with the server.',
         additionalProperties: true,
+        properties: {
+          authorizationResponseIssParameterSupported: {
+            type: 'boolean',
+            description:
+              'Whether the authorization server returns the "iss" parameter in the authorization response (RFC 9207). When true, callbacks without "iss" are rejected; when false, they are accepted. A provided "iss" is always validated. Overrides the "authorization_response_iss_parameter_supported" value discovered from server metadata.',
+          },
+        },
       },
       authProviderType: {
         type: 'string',
@@ -3185,6 +3192,13 @@ export const SETTINGS_SCHEMA_DEFINITIONS: Record<
         type: 'object',
         description: 'OAuth configuration for authenticating with the server.',
         additionalProperties: true,
+        properties: {
+          authorizationResponseIssParameterSupported: {
+            type: 'boolean',
+            description:
+              'Whether the authorization server returns the "iss" parameter in the authorization response (RFC 9207). When true, callbacks without "iss" are rejected; when false, they are accepted. A provided "iss" is always validated. Overrides the "authorization_response_iss_parameter_supported" value discovered from server metadata.',
+          },
+        },
       },
       authProviderType: {
         type: 'string',
@@ -3225,6 +3239,11 @@ export const SETTINGS_SCHEMA_DEFINITIONS: Record<
         type: 'string',
         description: 'Protocol for OTLP exporters.',
         enum: ['grpc', 'http'],
+      },
+      otlpHeaders: {
+        type: 'object',
+        description: 'Custom headers to send with OTLP exporter requests.',
+        additionalProperties: { type: 'string' },
       },
       traces: {
         type: 'boolean',
