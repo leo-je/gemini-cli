@@ -1154,6 +1154,7 @@ EOF`;
 
     it('should force confirmation when untrusted flags are present even in YOLO mode', async () => {
       vi.mocked(mockConfig.getApprovalMode).mockReturnValue(ApprovalMode.YOLO);
+      const debugSpy = vi.spyOn(debugLogger, 'debug');
       const mockClient = {
         getHistory: vi.fn().mockReturnValue([
           {
@@ -1177,6 +1178,13 @@ EOF`;
 
       expect(confirmation).not.toBe(false);
       expect(confirmation && confirmation.type).toBe('exec');
+
+      // Prompting despite an auto-approving mode must be explainable in --debug output.
+      expect(debugSpy).toHaveBeenCalledWith(
+        expect.stringContaining(
+          'Confirmation required despite approval mode "yolo"',
+        ),
+      );
     });
   });
 

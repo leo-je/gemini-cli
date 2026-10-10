@@ -1009,6 +1009,37 @@ describe('ToolConfirmationMessage', () => {
       expect(frame).toContain('BUILD');
       unmount();
     });
+
+    it('should explain that YOLO mode does not auto-approve security-blocked actions', async () => {
+      const confirmationDetails: SerializableConfirmationDetails = {
+        type: 'exec',
+        title: 'Confirm Shell Command',
+        command: 'blaze test //target:all --test_arg=malicious_flag',
+        rootCommand: 'blaze',
+        rootCommands: ['blaze'],
+        untrustedFlags: ['--test_arg=malicious_flag'],
+      };
+      const yoloConfig = {
+        ...(mockConfig as unknown as Record<string, unknown>),
+        getApprovalMode: () => 'yolo',
+      } as unknown as Config;
+
+      const { lastFrame, unmount } = await renderWithProviders(
+        <ToolConfirmationMessage
+          callId="test-yolo-note"
+          confirmationDetails={confirmationDetails}
+          config={yoloConfig}
+          getPreferredEditor={vi.fn()}
+          availableTerminalHeight={30}
+          terminalWidth={80}
+          toolName="run_shell_command"
+        />,
+      );
+
+      const frame = lastFrame();
+      expect(frame).toContain('YOLO mode will not auto-approve');
+      unmount();
+    });
   });
 
   describe('narrow and negative terminal widths for edit confirmations', () => {

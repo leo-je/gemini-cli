@@ -277,9 +277,22 @@ export class ShellToolInvocation extends BaseToolInvocation<
     const modifiedBuildFiles = getModifiedBuildFiles(this.context.config);
     const isBuildCmd = isBuildOrTestCommand(command);
 
-    return (
-      untrustedFlags.length > 0 || (isBuildCmd && modifiedBuildFiles.length > 0)
-    );
+    const hasRisk =
+      untrustedFlags.length > 0 ||
+      (isBuildCmd && modifiedBuildFiles.length > 0);
+
+    if (hasRisk) {
+      // This check runs before the YOLO/AUTO_EDIT shortcuts, so YOLO mode still
+      // prompts here. Log why, otherwise it looks like the approval mode is ignored.
+      debugLogger.debug(
+        `[ShellTool] Confirmation required despite approval mode "${this.context.config.getApprovalMode()}": ` +
+          `untrustedFlags=[${untrustedFlags.join(', ')}], ` +
+          `isBuildOrTestCommand=${isBuildCmd}, ` +
+          `modifiedBuildFiles=[${modifiedBuildFiles.join(', ')}]`,
+      );
+    }
+
+    return hasRisk;
   }
 
   override getPolicyUpdateOptions(

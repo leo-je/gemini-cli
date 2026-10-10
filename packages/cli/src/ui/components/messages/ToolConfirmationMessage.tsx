@@ -624,6 +624,26 @@ export const ToolConfirmationMessage: React.FC<
         }
       }
 
+      // Make it explicit why a confirmation is being shown in a mode that normally
+      // auto-approves everything (build-file protection / untrusted-input taint are
+      // deliberately not exempted by YOLO).
+      const currentApprovalMode = config.getApprovalMode();
+      if (
+        securityWarnings &&
+        (currentApprovalMode === ApprovalMode.YOLO ||
+          currentApprovalMode === ApprovalMode.AUTO_EDIT)
+      ) {
+        const modeName =
+          currentApprovalMode === ApprovalMode.YOLO ? 'YOLO' : 'Auto-Edit';
+        const modeNoteText = `${modeName} mode will not auto-approve this action: it is blocked by a security check (build-file protection or untrusted-input taint). Approve it explicitly, or adjust the action so it no longer triggers that check.`;
+        securityWarnings = (
+          <>
+            {securityWarnings}
+            <WarningMessage text={modeNoteText} />
+          </>
+        );
+      }
+
       const bodyHeight = availableBodyContentHeight();
 
       if (confirmationDetails.type === 'ask_user') {

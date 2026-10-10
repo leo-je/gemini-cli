@@ -16,6 +16,7 @@ import {
   WEB_FETCH_TOOL_NAME,
   ASK_USER_TOOL_NAME,
   debugLogger,
+  coreEvents,
   ApprovalMode,
   type MCPServerConfig,
   type GeminiCLIExtension,
@@ -2924,6 +2925,27 @@ describe('loadCliConfig approval mode', () => {
       const argv = await parseArguments(settings);
       const config = await loadCliConfig(settings, 'test-session', argv);
       expect(config.getApprovalMode()).toBe(ServerConfig.ApprovalMode.YOLO);
+    });
+
+    it('should warn visibly when the requested YOLO mode is dropped because the folder is untrusted', async () => {
+      vi.mocked(isWorkspaceTrusted).mockReturnValueOnce({
+        isTrusted: false,
+        source: 'file',
+      });
+      process.argv = ['node', 'script.js', '--yolo'];
+      const settings = createTestMergedSettings({});
+      const argv = await parseArguments(settings);
+      const feedbackSpy = vi.spyOn(coreEvents, 'emitFeedback');
+
+      const config = await loadCliConfig(settings, 'test-session', argv);
+
+      // The mode is deliberately dropped, but the user must not be left guessing
+      // why every tool call still asks for approval.
+      expect(config.getApprovalMode()).toBe(ServerConfig.ApprovalMode.DEFAULT);
+      expect(feedbackSpy).toHaveBeenCalledWith(
+        'warning',
+        expect.stringContaining('is not trusted'),
+      );
     });
 
     it('should respect plan mode from settings when plan is enabled', async () => {

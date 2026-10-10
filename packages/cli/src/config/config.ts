@@ -32,6 +32,7 @@ import {
   coreEvents,
   GEMINI_MODEL_ALIAS_AUTO,
   getAdminErrorMessage,
+  getApprovalModeDescription,
   isHeadlessMode,
   Config,
   SimpleExtensionLoader,
@@ -759,6 +760,12 @@ export async function loadCliConfig(
   if (!trustedFolder && approvalMode !== ApprovalMode.DEFAULT) {
     debugLogger.warn(
       `Approval mode overridden to "default" because the current folder is not trusted.`,
+    );
+    // Surface this loudly: the requested mode is dropped silently otherwise, which
+    // looks like the mode "not working" (every tool call still asks for approval).
+    coreEvents.emitFeedback(
+      'warning',
+      `Ignoring ${getApprovalModeDescription(approvalMode)}: the current folder (${cwd}) is not trusted, so approval mode fell back to "default" and tool calls will require confirmation. Trust the folder (or set GEMINI_CLI_TRUST_WORKSPACE=true) to use the requested mode.`,
     );
     approvalMode = ApprovalMode.DEFAULT;
   }

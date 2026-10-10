@@ -939,7 +939,7 @@ export class PolicyEngine {
         }
         if (targetPath && isBuildFile(targetPath)) {
           debugLogger.debug(
-            `[PolicyEngine.check] Target path '${targetPath}' is a build file. Downgrading to ASK_USER.`,
+            `[PolicyEngine.check] Target path '${targetPath}' is a build file. Downgrading to ASK_USER (approval mode "${this.approvalMode}" does not exempt build file modifications).`,
           );
           decision = this.nonInteractive
             ? PolicyDecision.DENY
