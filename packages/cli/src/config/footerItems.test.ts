@@ -123,6 +123,7 @@ describe('footerItems', () => {
         'hostname',
         'code-changes',
         'token-count',
+        'cache-hit',
       ]);
     });
 

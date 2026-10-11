@@ -31,6 +31,8 @@ exports[`<FooterConfigDialog /> > highlights the active item in the preview 1`] 
 │     Lines added/removed in the session (not shown when zero)                                     │
 │    [ ] token-count                                                                               │
 │     Total tokens used in the session (not shown when zero)                                       │
+│    [ ] cache-hit                                                                                 │
+│     Prompt cache hit rate for the session (not shown when zero)                                  │
 │    [✓] Show footer labels                                                                        │
 │                                                                                                  │
 │    Reset to default footer                                                                       │
@@ -78,6 +80,8 @@ exports[`<FooterConfigDialog /> > renders correctly with default settings 1`] = 
 │     Lines added/removed in the session (not shown when zero)                                     │
 │    [ ] token-count                                                                               │
 │     Total tokens used in the session (not shown when zero)                                       │
+│    [ ] cache-hit                                                                                 │
+│     Prompt cache hit rate for the session (not shown when zero)                                  │
 │    [✓] Show footer labels                                                                        │
 │                                                                                                  │
 │    Reset to default footer                                                                       │
@@ -126,6 +130,8 @@ exports[`<FooterConfigDialog /> > renders correctly with default settings 2`] = 
 │     Lines added/removed in the session (not shown when zero)                                     │
 │    [ ] token-count                                                                               │
 │     Total tokens used in the session (not shown when zero)                                       │
+│    [ ] cache-hit                                                                                 │
+│     Prompt cache hit rate for the session (not shown when zero)                                  │
 │    [✓] Show footer labels                                                                        │
 │                                                                                                  │
 │    Reset to default footer                                                                       │
@@ -173,6 +179,8 @@ exports[`<FooterConfigDialog /> > updates the preview when Show footer labels is
 │     Lines added/removed in the session (not shown when zero)                                     │
 │    [ ] token-count                                                                               │
 │     Total tokens used in the session (not shown when zero)                                       │
+│    [ ] cache-hit                                                                                 │
+│     Prompt cache hit rate for the session (not shown when zero)                                  │
 │  > [ ] Show footer labels                                                                        │
 │                                                                                                  │
 │    Reset to default footer                                                                       │

@@ -428,6 +428,47 @@ describe('toGeminiUsage', () => {
   it('returns undefined when there is no usage', () => {
     expect(toGeminiUsage(null)).toBeUndefined();
   });
+
+  it('maps prompt_tokens_details.cached_tokens to cachedContentTokenCount', () => {
+    expect(
+      toGeminiUsage({
+        prompt_tokens: 100,
+        completion_tokens: 10,
+        total_tokens: 110,
+        prompt_tokens_details: { cached_tokens: 80 },
+      }),
+    ).toEqual({
+      promptTokenCount: 100,
+      candidatesTokenCount: 10,
+      totalTokenCount: 110,
+      cachedContentTokenCount: 80,
+    });
+  });
+
+  it('falls back to prompt_cache_hit_tokens when details are absent', () => {
+    expect(
+      toGeminiUsage({
+        prompt_tokens: 50,
+        completion_tokens: 5,
+        prompt_cache_hit_tokens: 30,
+      }),
+    ).toEqual({
+      promptTokenCount: 50,
+      candidatesTokenCount: 5,
+      totalTokenCount: 55,
+      cachedContentTokenCount: 30,
+    });
+  });
+
+  it('omits cachedContentTokenCount when there are no cache fields', () => {
+    expect(
+      toGeminiUsage({
+        prompt_tokens: 3,
+        completion_tokens: 4,
+        total_tokens: 7,
+      }),
+    ).not.toHaveProperty('cachedContentTokenCount');
+  });
 });
 
 describe('buildGeminiResponse', () => {

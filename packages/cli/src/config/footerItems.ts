@@ -67,6 +67,11 @@ export const ALL_ITEMS = [
     header: 'tokens',
     description: 'Total tokens used in the session (not shown when zero)',
   },
+  {
+    id: 'cache-hit',
+    header: 'cache',
+    description: 'Prompt cache hit rate for the session',
+  },
 ] as const;
 
 export type FooterItemId = (typeof ALL_ITEMS)[number]['id'];
@@ -84,6 +89,7 @@ export const DEFAULT_ORDER = [
   'auth',
   'code-changes',
   'token-count',
+  'cache-hit',
 ];
 
 export function deriveItemsFromLegacySettings(

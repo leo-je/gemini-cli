@@ -78,6 +78,11 @@ export interface OpenAIUsage {
   prompt_tokens?: number;
   completion_tokens?: number;
   total_tokens?: number;
+  /** OpenAI official: cached prompt tokens via prompt cache. */
+  prompt_tokens_details?: { cached_tokens?: number };
+  /** Some OpenAI-compatible providers (e.g. DeepSeek). */
+  prompt_cache_hit_tokens?: number;
+  prompt_cache_read_tokens?: number;
 }
 
 /** A single tool call as it appears inside a fully assembled message. */

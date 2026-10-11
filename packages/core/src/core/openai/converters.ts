@@ -519,11 +519,17 @@ export function toGeminiUsage(
   }
   const promptTokenCount = usage.prompt_tokens ?? 0;
   const candidatesTokenCount = usage.completion_tokens ?? 0;
+  const cachedContentTokenCount =
+    usage.prompt_tokens_details?.cached_tokens ??
+    usage.prompt_cache_hit_tokens ??
+    usage.prompt_cache_read_tokens ??
+    0;
   return {
     promptTokenCount,
     candidatesTokenCount,
     totalTokenCount:
       usage.total_tokens ?? promptTokenCount + candidatesTokenCount,
+    ...(cachedContentTokenCount > 0 ? { cachedContentTokenCount } : {}),
   };
 }
 

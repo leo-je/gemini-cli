@@ -458,6 +458,23 @@ export const Footer: React.FC = () => {
         }
         break;
       }
+      case 'cache-hit': {
+        let cached = 0;
+        let prompt = 0;
+        for (const m of Object.values(uiState.sessionStats.metrics.models)) {
+          cached += m.tokens.cached;
+          prompt += m.tokens.prompt;
+        }
+        const rate = prompt > 0 ? Math.round((cached / prompt) * 100) : 0;
+        const formatted = `${rate}% cached`;
+        addCol(
+          id,
+          header,
+          () => <Text color={itemColor}>{formatted}</Text>,
+          formatted.length,
+        );
+        break;
+      }
       default:
         checkExhaustive(id);
         break;
