@@ -6,7 +6,7 @@
 
 import type { Content } from '@google/genai';
 import { parse as shellParse } from 'shell-quote';
-import { getCommandRoots } from './shell-utils.js';
+import { getCommandRoots, SHELL_TOOL_NAMES } from './shell-utils.js';
 
 export interface UntrustedContextData {
   untrustedTexts: string[];
@@ -270,6 +270,19 @@ export function extractUntrustedContext(
         part.functionResponse.response &&
         typeof part.functionResponse.response === 'object'
       ) {
+        // Output the shell produced ourselves is not external input. Indexing it
+        // made every flag the agent had ever run become "untrusted", so a command
+        // re-using its own earlier flag was blocked on every later turn. The
+        // <untrusted_context> tags still reach the model, so prompt-level
+        // isolation is unchanged; only this shell-execution gate is relaxed.
+        const sourceTool = part.functionResponse.name;
+        if (
+          typeof sourceTool === 'string' &&
+          SHELL_TOOL_NAMES.includes(sourceTool)
+        ) {
+          continue;
+        }
+
         const responseObj = part.functionResponse.response as LogResponse;
         const output = responseObj.output;
         const content = responseObj.content;
