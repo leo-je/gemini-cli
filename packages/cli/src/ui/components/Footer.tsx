@@ -35,8 +35,43 @@ import {
   deriveItemsFromLegacySettings,
 } from '../../config/footerItems.js';
 import { isDevelopment } from '../../utils/installationInfo.js';
+import { paginateFooterColumns } from '../utils/paginateFooterColumns.js';
 
 const HOSTNAME = os.hostname();
+
+/** How long each footer page is shown before auto-advancing to the next. */
+const FOOTER_PAGE_INTERVAL_MS = 5000;
+
+/**
+ * Horizontal space reserved for the page indicator (row separator + a counter
+ * such as `1/3`) when there is more than one page. Not reserved for single-page
+ * layouts, so those are unaffected.
+ */
+const FOOTER_PAGE_INDICATOR_WIDTH = 6;
+
+/**
+ * Cycles through footer pages automatically. When there is a single page (the
+ * common case where everything fits) no timer is scheduled and this returns 0,
+ * so the rendered output stays byte-for-byte identical to the non-paginated
+ * footer.
+ */
+function useFooterPage(pageCount: number): number {
+  const [page, setPage] = useState(0);
+
+  useEffect(() => {
+    if (pageCount <= 1) {
+      setPage(0);
+      return;
+    }
+    const timer = setInterval(
+      () => setPage((p) => (p + 1) % pageCount),
+      FOOTER_PAGE_INTERVAL_MS,
+    );
+    return () => clearInterval(timer);
+  }, [pageCount]);
+
+  return pageCount > 0 ? page % pageCount : 0;
+}
 
 interface CwdIndicatorProps {
   targetDir: string;
@@ -493,25 +528,16 @@ export const Footer: React.FC = () => {
     );
   }
 
-  // --- Width Fitting Logic ---
-  const columnsToRender: FooterColumn[] = [];
-  let droppedAny = false;
-  let currentUsedWidth = 2; // Initial padding
-
-  for (const col of potentialColumns) {
-    const gap = columnsToRender.length > 0 ? (showLabels ? COLUMN_GAP : 3) : 0;
-    const budgetWidth = col.id === 'workspace' ? 20 : col.width;
-
-    if (
-      col.isHighPriority ||
-      currentUsedWidth + gap + budgetWidth <= terminalWidth - 2
-    ) {
-      columnsToRender.push(col);
-      currentUsedWidth += gap + budgetWidth;
-    } else {
-      droppedAny = true;
-    }
-  }
+  // --- Width Fitting Logic (paginated) ---
+  const gap = showLabels ? COLUMN_GAP : 3;
+  const pages = paginateFooterColumns(potentialColumns, {
+    terminalWidth,
+    gap,
+    reserveWidth: FOOTER_PAGE_INDICATOR_WIDTH,
+  });
+  const pageIndex = useFooterPage(pages.length);
+  const columnsToRender = pages[pageIndex] ?? [];
+  const pageCount = pages.length;
 
   const rowItems: FooterRowItem[] = columnsToRender.map((col, index) => {
     const isWorkspace = col.id === 'workspace';
@@ -521,14 +547,13 @@ export const Footer: React.FC = () => {
     const otherItemsWidth = columnsToRender
       .filter((c) => c.id !== 'workspace')
       .reduce((sum, c) => sum + c.width, 0);
-    const numItems = columnsToRender.length + (droppedAny ? 1 : 0);
+    const numItems = columnsToRender.length;
     const numGaps = numItems > 1 ? numItems - 1 : 0;
-    const gapsWidth = numGaps * (showLabels ? COLUMN_GAP : 3);
-    const ellipsisWidth = droppedAny ? 1 : 0;
+    const gapsWidth = numGaps * gap;
 
     const availableForWorkspace = Math.max(
       20,
-      terminalWidth - 2 - gapsWidth - otherItemsWidth - ellipsisWidth,
+      terminalWidth - 2 - gapsWidth - otherItemsWidth,
     );
 
     const estimatedWidth = isWorkspace ? availableForWorkspace : col.width;
@@ -539,16 +564,21 @@ export const Footer: React.FC = () => {
       element: col.element(estimatedWidth),
       flexGrow: 0,
       flexShrink: isWorkspace ? 1 : 0,
-      alignItems:
-        isLast && !droppedAny && index > 0 ? 'flex-end' : 'flex-start',
+      alignItems: isLast && index > 0 ? 'flex-end' : 'flex-start',
     };
   });
 
-  if (droppedAny) {
+  // When overflow generates extra pages, show a page indicator instead of the
+  // old drop-ellipsis. Single-page output is unchanged.
+  if (pageCount > 1) {
     rowItems.push({
-      key: 'ellipsis',
+      key: 'page-indicator',
       header: '',
-      element: <Text color={theme.ui.comment}>…</Text>,
+      element: (
+        <Text color={theme.ui.comment}>
+          {pageIndex + 1}/{pageCount}
+        </Text>
+      ),
       flexGrow: 0,
       flexShrink: 0,
       alignItems: 'flex-end',
