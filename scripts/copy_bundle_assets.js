@@ -21,6 +21,7 @@ import { copyFileSync, existsSync, mkdirSync, cpSync } from 'node:fs';
 import { dirname, join, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { glob } from 'glob';
+import { writeBundlePackageJson } from './bundle_package.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = join(__dirname, '..');
@@ -118,5 +119,16 @@ if (existsSync(extensionExamplesSrc)) {
   });
   console.log(`Copied extension examples to ${bundleDirName}/examples/`);
 }
+
+// 7. Write package.json so the bundle is a linkable npm package.
+// A single-file build writes gemini.mjs; the split build writes gemini.js.
+// yoga-layout is only external in the single-file build, so only it needs the
+// dependency declared.
+const isSingleFile = bundleDirName === 'bundle-single';
+writeBundlePackageJson(bundleDir, {
+  entry: isSingleFile ? 'gemini.mjs' : 'gemini.js',
+  needsYogaLayout: isSingleFile,
+});
+console.log(`Wrote package.json to ${bundleDirName}/ (npm-linkable)`);
 
 console.log(`Assets copied to ${bundleDirName}/`);

@@ -51,6 +51,7 @@ applies to both bundle layouts:
 | `bundled/chrome-devtools-mcp.mjs` | Browser agent (spawned as a child process)  |
 | `worker/worker-entry.js`          | ink render worker                           |
 | `sandbox-macos-*.sb`              | macOS seatbelt sandbox profiles             |
+| `package.json`                    | npm, to link or install the bundle          |
 
 Two of these are worth calling out:
 
@@ -65,6 +66,53 @@ Native modules — `@lydell/node-pty`, `node-pty`, and `@github/keytar` — stay
 external in every build because they ship `.node` binaries that cannot be
 inlined into JavaScript. They are loaded at runtime with a dynamic `require`, so
 `node_modules` has to be resolvable from the bundle.
+
+## Linking or installing the bundle
+
+Both builds write a `package.json` next to the entry point, so the bundle is a
+package you install rather than a directory you wire up by hand. The manifest
+names the package `@leo-je/gemini-cli`, declares `"type": "module"` (the split
+build's entry is a `.js` file, which Node would otherwise treat as CommonJS),
+and points its `gemini-leo` bin at the entry file.
+
+Releases from this fork publish the bundle as a `.tgz` so it installs with a
+single command:
+
+```bash
+npm install -g gemini-cli-bundle-<platform>-<version>.tgz
+gemini-leo --version
+```
+
+A global install from the tarball copies the package into the global
+`node_modules`, creates the `gemini-leo` command, and resolves the one runtime
+dependency the single-file build keeps external, `yoga-layout`. Once installed,
+the downloaded file is no longer needed.
+
+Do not install the bundle with `npm link` or `npm install -g <directory>`.
+Neither resolves dependencies, which matters here for two reasons:
+
+- `npm link` and directory installs only write a symlink to the unpacked folder,
+  so deleting that folder breaks the command.
+- Neither runs dependency resolution, so `yoga-layout` is never installed. The
+  single-file build imports it at the top level, so `gemini-leo` exits with
+  `ERR_MODULE_NOT_FOUND` instead of starting.
+
+`npm install -g` accepts a tarball or a directory, but not a `.zip`; given a
+`.zip` it treats the path as a directory and fails on the missing
+`package.json`. That is why the release assets are `.tgz`.
+
+The package is scoped to `@leo-je/gemini-cli` rather than `@google/gemini-cli`
+on purpose. Installing under the published name would replace an existing global
+install of Gemini CLI instead of sitting beside it.
+
+Released archives carry no `node_modules`. Staging the build machine's
+`node_modules` would ship native binaries built for the wrong platform, so the
+tarball declares only what npm can resolve on the target machine. The
+single-file build marks `yoga-layout` external and declares it under
+`dependencies`, which is what the global install fetches; the split build
+inlines `yoga-layout` and declares no dependencies. Native modules
+(`@lydell/node-pty`, `@github/keytar`) are not declared at all, so a global
+install does not pull them in and the CLI uses its fallbacks.
 
 ## Top-level await
 
