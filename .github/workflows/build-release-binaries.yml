@@ -196,8 +196,8 @@ jobs:
         run: 'npm run bundle:single'
 
       # Windows gets its own step for the same reason as the binary job below:
-      # Git Bash on the windows runner has no `zip` on PATH, while
-      # `Compress-Archive` ships with Windows and needs nothing installed.
+      # Git Bash on the windows runner has no `zip` on PATH. Packaging no longer
+      # needs a compression tool at all — `npm pack` writes the tarball.
       - name: 'Package Bundle (Windows)'
         id: 'package-win'
         if: "matrix.os == 'windows-latest'"
@@ -207,15 +207,22 @@ jobs:
 
           $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
           $platform = '${{ matrix.platform_name }}'
-          $archive = "gemini-cli-bundle-$platform-$version.zip"
+          $archive = "gemini-cli-bundle-$platform-$version.tgz"
           $dest = Join-Path $env:RUNNER_TEMP $archive
 
-          # Archive bundle-single/ as-is. `npm run bundle:single` writes a
-          # package.json into it, which is what makes `npm link` inside the
-          # unpacked bundle expose a `gemini-leo` command. No node_modules
-          # are staged: shipping them would carry this runner's native
-          # binaries, and `npm install` in the bundle installs yoga-layout, the
-          # one runtime dependency, for the user's own platform.
+          # Pack bundle-single/ as an installable tarball. `npm run bundle:single`
+          # writes a package.json into it, which gives the package a name and a
+          # `gemini-leo` bin. No node_modules are staged: shipping them would
+          # carry this runner's native binaries. npm resolves the one declared
+          # runtime dependency, yoga-layout, on the machine that installs it.
+          #
+          # The archive is a .tgz rather than a .zip because npm only installs
+          # local directories and tarballs — it reads a .zip argument as a
+          # directory and fails on the missing package.json inside it.
+          #
+          # Staged under RUNNER_TEMP: npm pack copies whatever it finds there
+          # verbatim, so packing outside the repository also keeps .gitignore and
+          # node_modules out of the tarball.
           $stage = Join-Path $env:RUNNER_TEMP 'stage'
           Remove-Item -Recurse -Force $stage -ErrorAction SilentlyContinue
           New-Item -ItemType Directory -Force -Path $stage | Out-Null
@@ -225,32 +232,49 @@ jobs:
           Get-ChildItem -Path 'bundle-single' -Force |
             ForEach-Object { Copy-Item -LiteralPath $_.FullName -Destination $stage -Recurse -Force }
 
-          $staged = Get-ChildItem -Path $stage -Force | Select-Object -ExpandProperty FullName
-          Compress-Archive -LiteralPath $staged -DestinationPath $dest
+          Remove-Item (Join-Path $env:RUNNER_TEMP '*.tgz') -Force -ErrorAction SilentlyContinue
+          npm pack $stage --pack-destination $env:RUNNER_TEMP --loglevel=warn
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          # npm derives the filename from the manifest; rename it so the asset is
+          # not tied to the package name.
+          $packed = Get-ChildItem -Path $env:RUNNER_TEMP -Filter '*.tgz' | Select-Object -First 1
+          Move-Item -Force -LiteralPath $packed.FullName -Destination $dest
 
-          # Verify the archive rather than the staging directory, unpacked
-          # outside the repository: inside it Node would resolve the workspace's
-          # node_modules and hide a packaging mistake.
-          $test = Join-Path $env:RUNNER_TEMP 'test-bundle'
-          Remove-Item -Recurse -Force $test -ErrorAction SilentlyContinue
-          New-Item -ItemType Directory -Force -Path $test | Out-Null
-          Expand-Archive -Path $dest -DestinationPath $test
+          # Verify by installing the tarball into a throwaway prefix. A global
+          # install, unlike `npm link` or `npm install -g <dir>`, copies the
+          # package and resolves dependencies — which is what a user gets from
+          # the downloaded archive.
+          $prefix = Join-Path $env:RUNNER_TEMP 'npm-prefix'
+          Remove-Item -Recurse -Force $prefix -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force -Path $prefix | Out-Null
+          npm install -g --prefix $prefix $dest --loglevel=warn
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-          # The manifest is what turns the archive into an installable package.
-          # Without it npm link fails outright, and without a matching `bin` it
-          # links nothing and no command appears.
-          $manifest = Join-Path $test 'package.json'
-          if (-not (Test-Path $manifest)) { throw "Missing package.json in $archive" }
-          $meta = Get-Content $manifest -Raw | ConvertFrom-Json
-          if ($meta.name -ne '@leo-je/gemini-cli' -or $meta.bin.'gemini-leo' -ne 'gemini.mjs') {
-            throw "Unexpected package.json in ${archive}: name=$($meta.name) bin=$($meta.bin.'gemini-leo')"
+          $installed = Join-Path $prefix 'node_modules/@leo-je/gemini-cli'
+          if (-not (Test-Path (Join-Path $installed 'gemini.mjs'))) {
+            throw "Installing $archive did not place the entry under $installed"
+          }
+          if (-not (Test-Path (Join-Path $installed 'node_modules/yoga-layout'))) {
+            throw "Installing $archive did not resolve yoga-layout"
+          }
+          # The bin mapping is what turns the package into a command. npm puts
+          # global shims in the prefix root on Windows.
+          $command = @(
+            (Join-Path $prefix 'gemini-leo.cmd'),
+            (Join-Path $prefix 'bin/gemini-leo.cmd')
+          ) | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (-not $command) {
+            throw "Installing $archive did not create a gemini-leo command"
           }
 
-          $version = & node (Join-Path $test 'gemini.mjs') --version
+          # Run the installed copy: from here node resolves the package's own
+          # node_modules. Running the staging directory instead would resolve the
+          # workspace's, hiding a packaging mistake.
+          $version = & node (Join-Path $installed 'gemini.mjs') --version
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           Write-Host "Bundle reports version: $version"
 
-          Remove-Item -Recurse -Force $test, $stage -ErrorAction SilentlyContinue
+          Remove-Item -Recurse -Force $prefix, $stage -ErrorAction SilentlyContinue
 
           "asset=$archive" >> $env:GITHUB_OUTPUT
           Get-Item $dest | Format-List Name, Length
@@ -263,50 +287,56 @@ jobs:
 
           VERSION=$(node -p "require('./package.json').version")
           PLATFORM="${{ matrix.platform_name }}"
-          ARCHIVE="gemini-cli-bundle-$PLATFORM-$VERSION.zip"
+          ARCHIVE="gemini-cli-bundle-$PLATFORM-$VERSION.tgz"
 
-          # Archive bundle-single/ as-is. `npm run bundle:single` writes a
-          # package.json into it, which is what makes `npm link` inside the
-          # unpacked bundle expose a `gemini-leo` command. No node_modules
-          # are staged: shipping them would carry this runner's native
-          # binaries, and `npm install` in the bundle installs yoga-layout, the
-          # one runtime dependency, for the user's own platform.
+          # Pack bundle-single/ as an installable tarball. `npm run bundle:single`
+          # writes a package.json into it, which gives the package a name and a
+          # `gemini-leo` bin. No node_modules are staged: shipping them would
+          # carry this runner's native binaries. npm resolves the one declared
+          # runtime dependency, yoga-layout, on the machine that installs it.
+          #
+          # The archive is a .tgz rather than a .zip because npm only installs
+          # local directories and tarballs — it reads a .zip argument as a
+          # directory and fails on the missing package.json inside it.
+          #
+          # Staged under RUNNER_TEMP: npm pack copies whatever it finds there
+          # verbatim, so packing outside the repository also keeps .gitignore and
+          # node_modules out of the tarball.
           STAGE="$RUNNER_TEMP/stage"
           rm -rf "$STAGE"
           mkdir -p "$STAGE"
           cp -R bundle-single/. "$STAGE/"
 
           chmod +x "$STAGE/gemini.mjs"
-          (cd "$STAGE" && zip -q -r "$RUNNER_TEMP/$ARCHIVE" .)
+          rm -f "$RUNNER_TEMP"/*.tgz
+          npm pack "$STAGE" --pack-destination "$RUNNER_TEMP" --loglevel=warn
+          # npm derives the filename from the manifest; rename it so the asset is
+          # not tied to the package name.
+          mv "$RUNNER_TEMP"/*.tgz "$RUNNER_TEMP/$ARCHIVE"
 
-          # Verify the archive rather than the staging directory, unpacked
-          # outside the repository: inside it Node would resolve the workspace's
-          # node_modules and hide a packaging mistake.
-          rm -rf "$RUNNER_TEMP/test-bundle"
-          mkdir -p "$RUNNER_TEMP/test-bundle"
-          unzip -q "$RUNNER_TEMP/$ARCHIVE" -d "$RUNNER_TEMP/test-bundle"
+          # Verify by installing the tarball into a throwaway prefix. A global
+          # install, unlike `npm link` or `npm install -g <dir>`, copies the
+          # package and resolves dependencies — which is what a user gets from
+          # the downloaded archive.
+          PREFIX="$RUNNER_TEMP/npm-prefix"
+          rm -rf "$PREFIX"
+          mkdir -p "$PREFIX"
+          npm install -g --prefix "$PREFIX" "$RUNNER_TEMP/$ARCHIVE" --loglevel=warn
 
-          # The manifest is what turns the archive into an installable package.
-          # Without it npm link fails outright, and without a matching `bin` it
-          # links nothing and no command appears.
-          node -e '
-            const { readFileSync } = require("node:fs");
-            const path = process.argv[1];
-            const meta = JSON.parse(readFileSync(path, "utf8"));
-            if (meta.name !== "@leo-je/gemini-cli") {
-              throw new Error(`unexpected name in ${path}: ${meta.name}`);
-            }
-            if (meta.bin?.["gemini-leo"] !== "gemini.mjs") {
-              throw new Error(`unexpected bin in ${path}: ${meta.bin?.["gemini-leo"]}`);
-            }
-          ' "$RUNNER_TEMP/test-bundle/package.json"
+          INSTALLED="$PREFIX/lib/node_modules/@leo-je/gemini-cli"
+          test -f "$INSTALLED/gemini.mjs"
+          test -d "$INSTALLED/node_modules/yoga-layout"
+          test -x "$PREFIX/bin/gemini-leo"
 
+          # Run the installed copy: from here node resolves the package's own
+          # node_modules. Running the staging directory instead would resolve the
+          # workspace's, hiding a packaging mistake.
           # Assigned before echoing: `echo "... $(node ...)"` would swallow a
           # non-zero exit from node, which `set -e` cannot see through.
-          VERSION_OUT=$(node "$RUNNER_TEMP/test-bundle/gemini.mjs" --version)
+          VERSION_OUT=$(node "$INSTALLED/gemini.mjs" --version)
           echo "Bundle reports version: ${VERSION_OUT}"
 
-          rm -rf "$RUNNER_TEMP/test-bundle" "$STAGE"
+          rm -rf "$PREFIX" "$STAGE"
 
           echo "asset=$ARCHIVE" >> "$GITHUB_OUTPUT"
           ls -la "$RUNNER_TEMP/$ARCHIVE"
