@@ -210,43 +210,45 @@ jobs:
           $archive = "gemini-cli-bundle-$platform-$version.zip"
           $dest = Join-Path $env:RUNNER_TEMP $archive
 
-          # Stage the bundle with the node_modules it needs at runtime.
-          # yoga-layout is external because its entry point uses top-level
-          # await, which esbuild cannot inline without code splitting; the
-          # native modules cannot be bundled into JavaScript at all. Staged
-          # under RUNNER_TEMP so nothing lands inside the tree being packed.
+          # Archive bundle-single/ as-is. `npm run bundle:single` writes a
+          # package.json into it, which is what makes `npm link` inside the
+          # unpacked bundle expose a `gemini-leo` command. No node_modules
+          # are staged: shipping them would carry this runner's native
+          # binaries, and `npm install` in the bundle installs yoga-layout, the
+          # one runtime dependency, for the user's own platform.
           $stage = Join-Path $env:RUNNER_TEMP 'stage'
           Remove-Item -Recurse -Force $stage -ErrorAction SilentlyContinue
           New-Item -ItemType Directory -Force -Path $stage | Out-Null
-          New-Item -ItemType Directory -Force -Path (Join-Path $stage 'node_modules') | Out-Null
           # -LiteralPath throughout: the docs copied into the bundle are
           # markdown files under names we do not control, and a '[' in one would
           # be read as a wildcard class by the -Path variants.
           Get-ChildItem -Path 'bundle-single' -Force |
             ForEach-Object { Copy-Item -LiteralPath $_.FullName -Destination $stage -Recurse -Force }
-          foreach ($module in 'yoga-layout', '@lydell', '@github') {
-            Copy-Item -LiteralPath "node_modules/$module" -Destination (Join-Path $stage 'node_modules') -Recurse -Force
-          }
 
           $staged = Get-ChildItem -Path $stage -Force | Select-Object -ExpandProperty FullName
           Compress-Archive -LiteralPath $staged -DestinationPath $dest
 
           # Verify the archive rather than the staging directory, unpacked
-          # outside the repository: inside it Node would resolve node_modules
-          # from the workspace and hide a missing dependency.
+          # outside the repository: inside it Node would resolve the workspace's
+          # node_modules and hide a packaging mistake.
           $test = Join-Path $env:RUNNER_TEMP 'test-bundle'
           Remove-Item -Recurse -Force $test -ErrorAction SilentlyContinue
           New-Item -ItemType Directory -Force -Path $test | Out-Null
           Expand-Archive -Path $dest -DestinationPath $test
 
+          # The manifest is what turns the archive into an installable package.
+          # Without it npm link fails outright, and without a matching `bin` it
+          # links nothing and no command appears.
+          $manifest = Join-Path $test 'package.json'
+          if (-not (Test-Path $manifest)) { throw "Missing package.json in $archive" }
+          $meta = Get-Content $manifest -Raw | ConvertFrom-Json
+          if ($meta.name -ne '@leo-je/gemini-cli' -or $meta.bin.'gemini-leo' -ne 'gemini.mjs') {
+            throw "Unexpected package.json in ${archive}: name=$($meta.name) bin=$($meta.bin.'gemini-leo')"
+          }
+
           $version = & node (Join-Path $test 'gemini.mjs') --version
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           Write-Host "Bundle reports version: $version"
-
-          # `--version` never loads the native modules (the CLI requires them
-          # lazily), so check them explicitly.
-          & node scripts/verify-native-modules.js (Join-Path $test 'gemini.mjs')
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
           Remove-Item -Recurse -Force $test, $stage -ErrorAction SilentlyContinue
 
@@ -263,36 +265,46 @@ jobs:
           PLATFORM="${{ matrix.platform_name }}"
           ARCHIVE="gemini-cli-bundle-$PLATFORM-$VERSION.zip"
 
-          # Stage the bundle with the node_modules it needs at runtime.
-          # yoga-layout is external because its entry point uses top-level
-          # await, which esbuild cannot inline without code splitting; the
-          # native modules cannot be bundled into JavaScript at all. Staged
-          # under RUNNER_TEMP so nothing lands inside the tree being packed.
+          # Archive bundle-single/ as-is. `npm run bundle:single` writes a
+          # package.json into it, which is what makes `npm link` inside the
+          # unpacked bundle expose a `gemini-leo` command. No node_modules
+          # are staged: shipping them would carry this runner's native
+          # binaries, and `npm install` in the bundle installs yoga-layout, the
+          # one runtime dependency, for the user's own platform.
           STAGE="$RUNNER_TEMP/stage"
           rm -rf "$STAGE"
-          mkdir -p "$STAGE/node_modules"
+          mkdir -p "$STAGE"
           cp -R bundle-single/. "$STAGE/"
-          for module in yoga-layout @lydell @github; do
-            cp -R "node_modules/$module" "$STAGE/node_modules/"
-          done
 
           chmod +x "$STAGE/gemini.mjs"
           (cd "$STAGE" && zip -q -r "$RUNNER_TEMP/$ARCHIVE" .)
 
           # Verify the archive rather than the staging directory, unpacked
-          # outside the repository: inside it Node would resolve node_modules
-          # from the workspace and hide a missing dependency.
+          # outside the repository: inside it Node would resolve the workspace's
+          # node_modules and hide a packaging mistake.
           rm -rf "$RUNNER_TEMP/test-bundle"
           mkdir -p "$RUNNER_TEMP/test-bundle"
           unzip -q "$RUNNER_TEMP/$ARCHIVE" -d "$RUNNER_TEMP/test-bundle"
+
+          # The manifest is what turns the archive into an installable package.
+          # Without it npm link fails outright, and without a matching `bin` it
+          # links nothing and no command appears.
+          node -e '
+            const { readFileSync } = require("node:fs");
+            const path = process.argv[1];
+            const meta = JSON.parse(readFileSync(path, "utf8"));
+            if (meta.name !== "@leo-je/gemini-cli") {
+              throw new Error(`unexpected name in ${path}: ${meta.name}`);
+            }
+            if (meta.bin?.["gemini-leo"] !== "gemini.mjs") {
+              throw new Error(`unexpected bin in ${path}: ${meta.bin?.["gemini-leo"]}`);
+            }
+          ' "$RUNNER_TEMP/test-bundle/package.json"
+
           # Assigned before echoing: `echo "... $(node ...)"` would swallow a
           # non-zero exit from node, which `set -e` cannot see through.
           VERSION_OUT=$(node "$RUNNER_TEMP/test-bundle/gemini.mjs" --version)
           echo "Bundle reports version: ${VERSION_OUT}"
-
-          # `--version` never loads the native modules (the CLI requires them
-          # lazily), so check them explicitly.
-          node scripts/verify-native-modules.js "$RUNNER_TEMP/test-bundle/gemini.mjs"
 
           rm -rf "$RUNNER_TEMP/test-bundle" "$STAGE"
 
