@@ -10,10 +10,14 @@ import {
   BUNDLE_PACKAGE_NAME,
   BUNDLE_BIN_NAME,
   YOGA_LAYOUT_RANGE,
+  NODE_PTY_PACKAGE,
 } from '../bundle_package.js';
 
 describe('createBundlePackageJson', () => {
-  const rootPkg = { version: '0.1.13' };
+  const rootPkg = {
+    version: '0.1.13',
+    optionalDependencies: { '@lydell/node-pty': '1.1.0' },
+  };
 
   it('names the package so it cannot shadow the upstream global install', () => {
     const pkg = createBundlePackageJson(rootPkg, { entry: 'gemini.js' });
@@ -63,5 +67,50 @@ describe('createBundlePackageJson', () => {
       needsYogaLayout: true,
     });
     expect(pkg.dependencies).toEqual({ 'yoga-layout': YOGA_LAYOUT_RANGE });
+  });
+
+  describe('native modules', () => {
+    it('declares node-pty as optional so unmatched platforms skip it', () => {
+      const pkg = createBundlePackageJson(rootPkg, { entry: 'gemini.mjs' });
+      expect(pkg.optionalDependencies).toEqual({ '@lydell/node-pty': '1.1.0' });
+      expect(NODE_PTY_PACKAGE).toBe('@lydell/node-pty');
+    });
+
+    it('tracks the version the repository pins', () => {
+      const pkg = createBundlePackageJson(
+        {
+          version: '0.1.13',
+          optionalDependencies: { '@lydell/node-pty': '2.0.0' },
+        },
+        { entry: 'gemini.mjs' },
+      );
+      expect(pkg.optionalDependencies[NODE_PTY_PACKAGE]).toBe('2.0.0');
+    });
+
+    it('falls back to a known version when the repository does not pin one', () => {
+      const pkg = createBundlePackageJson(
+        { version: '0.1.13' },
+        {
+          entry: 'gemini.mjs',
+        },
+      );
+      expect(pkg.optionalDependencies[NODE_PTY_PACKAGE]).toBe('1.1.0');
+    });
+
+    // keytar cannot be gated: it ships every platform's prebuild in one package
+    // and declares no os/cpu, so npm would install it everywhere. It must never
+    // be declared here, or installs break on platforms it cannot load on.
+    it('never declares keytar', () => {
+      const pkg = createBundlePackageJson(rootPkg, {
+        entry: 'gemini.mjs',
+        needsYogaLayout: true,
+      });
+      const declared = {
+        ...pkg.dependencies,
+        ...pkg.optionalDependencies,
+      };
+      expect(declared).not.toHaveProperty('@github/keytar');
+      expect(declared).not.toHaveProperty('keytar');
+    });
   });
 });

@@ -107,12 +107,21 @@ install of Gemini CLI instead of sitting beside it.
 
 Released archives carry no `node_modules`. Staging the build machine's
 `node_modules` would ship native binaries built for the wrong platform, so the
-tarball declares only what npm can resolve on the target machine. The
-single-file build marks `yoga-layout` external and declares it under
-`dependencies`, which is what the global install fetches; the split build
-inlines `yoga-layout` and declares no dependencies. Native modules
-(`@lydell/node-pty`, `@github/keytar`) are not declared at all, so a global
-install does not pull them in and the CLI uses its fallbacks.
+tarball declares what npm can resolve on the target machine instead.
+
+- The single-file build marks `yoga-layout` external and declares it under
+  `dependencies`; the split build inlines it and declares no dependencies.
+- `@lydell/node-pty` is declared under `optionalDependencies`. npm installs it
+  only on a platform it supports: the `@lydell/node-pty-<platform>-<arch>`
+  subpackages carry `os` and `cpu` fields, and npm skips the ones that do not
+  match. Making it optional means a platform with no matching subpackage (an
+  Android device, for example) skips PTY support instead of failing the whole
+  install. PTY support backs interactive shell tools; without it those degrade
+  rather than break.
+- `@github/keytar` is not declared. It ships prebuilds for every platform in a
+  single package and declares no `os` or `cpu`, so npm would install it
+  everywhere and it would fail to load on most of them. The CLI uses its
+  file-backed keychain instead.
 
 ## Top-level await
 
