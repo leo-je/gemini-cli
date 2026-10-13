@@ -34,8 +34,12 @@ export function getSafeGitEnv(
     GIT_CONFIG_VALUE_1: '',
     GIT_CONFIG_KEY_2: 'core.hooksPath',
     GIT_CONFIG_VALUE_2: '',
+    // Use 'ssh' rather than '': an empty core.sshCommand makes git attempt to
+    // execute an executable named "", which fails and breaks all SSH-based
+    // remotes. Setting it explicitly also neutralizes any repository-level
+    // core.sshCommand.
     GIT_CONFIG_KEY_3: 'core.sshCommand',
-    GIT_CONFIG_VALUE_3: '',
+    GIT_CONFIG_VALUE_3: 'ssh',
     GIT_CONFIG_KEY_4: 'core.pager',
     GIT_CONFIG_VALUE_4: 'cat',
     GIT_CONFIG_KEY_5: 'core.editor',

@@ -33,8 +33,14 @@ if (!existsSync(join(root, 'node_modules'))) {
 // build all workspaces/packages
 execSync('npm run generate', { stdio: 'inherit', cwd: root });
 
-if (process.env.CI) {
-  console.log('CI environment detected. Building workspaces sequentially...');
+// Android (e.g. Termux) is not supported by pidtree, which backs the parallel
+// build path via npm-run-all, so fall back to sequential builds there too.
+if (process.env.CI || process.platform === 'android') {
+  console.log(
+    process.env.CI
+      ? 'CI environment detected. Building workspaces sequentially...'
+      : 'Android platform detected. Building workspaces sequentially...',
+  );
   execSync('npm run build --workspaces', { stdio: 'inherit', cwd: root });
 } else {
   // Build core first because everyone depends on it

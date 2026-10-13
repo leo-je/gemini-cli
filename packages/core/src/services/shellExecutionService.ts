@@ -611,7 +611,10 @@ export class ShellExecutionService {
       ['credential.helper', ''],
       ['core.fsmonitor', ''],
       ['core.hooksPath', ''],
-      ['core.sshCommand', ''],
+      // Use 'ssh' rather than '': an empty core.sshCommand makes git attempt
+      // to execute an executable named "", which fails and breaks all
+      // SSH-based remotes.
+      ['core.sshCommand', 'ssh'],
       ['core.pager', 'cat'],
       ['core.editor', ''],
       ['sequence.editor', ''],
