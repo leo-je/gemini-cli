@@ -14,10 +14,38 @@ import type {
   Config,
   ResumedSessionData,
 } from '@google/gemini-cli-core';
-import type { HistoryItemWithoutId } from '../types.js';
+import type { HistoryItem, HistoryItemWithoutId } from '../types.js';
 import type { UseHistoryManagerReturn } from './useHistoryManager.js';
 import { convertSessionToHistoryFormats } from './useSessionBrowser.js';
 import type { Part } from '@google/genai';
+
+/**
+ * Assigns stable ids to resumed history items.
+ *
+ * Mirrors the ids the previous clearItems()+addItem() loop produced (1-based,
+ * in order) while preserving addItem's suppression of consecutive duplicate
+ * user messages, so loading a session stays visually identical.
+ */
+function toHistoryItemsWithIds(
+  uiHistory: HistoryItemWithoutId[],
+): HistoryItem[] {
+  const items: HistoryItem[] = [];
+  let previous: HistoryItem | undefined;
+  uiHistory.forEach((item, index) => {
+    const withId = { ...item, id: index + 1 } as HistoryItem;
+    if (
+      previous &&
+      previous.type === 'user' &&
+      withId.type === 'user' &&
+      previous.text === withId.text
+    ) {
+      return;
+    }
+    items.push(withId);
+    previous = withId;
+  });
+  return items;
+}
 
 interface UseSessionResumeParams {
   config: Config;
@@ -71,10 +99,10 @@ export function useSessionResume({
       try {
         // Now that we have the client, load the history into the UI and the client.
         setQuittingMessages(null);
-        historyManagerRef.current.clearItems();
-        uiHistory.forEach((item, index) => {
-          historyManagerRef.current.addItem(item, index, true);
-        });
+        // Load the whole history in a single state update. Applying resumed
+        // items one addItem() at a time ran a separate render per item, which
+        // made the UI flicker while a session was being resumed.
+        historyManagerRef.current.loadHistory(toHistoryItemsWithIds(uiHistory));
         refreshStaticRef.current(); // Force Static component to re-render with the updated history.
 
         // Restore directories from the resumed session

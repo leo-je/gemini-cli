@@ -65,7 +65,7 @@ describe('useSessionResume', () => {
       expect(result.current.loadHistoryForResume).toBeInstanceOf(Function);
     });
 
-    it('should clear history and add items when loading history', async () => {
+    it('should load the whole history in a single update when loading history', async () => {
       const { result } = await renderHook(() =>
         useSessionResume(getDefaultProps()),
       );
@@ -100,20 +100,15 @@ describe('useSessionResume', () => {
       });
 
       expect(mockSetQuittingMessages).toHaveBeenCalledWith(null);
-      expect(mockHistoryManager.clearItems).toHaveBeenCalled();
-      expect(mockHistoryManager.addItem).toHaveBeenCalledTimes(2);
-      expect(mockHistoryManager.addItem).toHaveBeenNthCalledWith(
-        1,
-        { type: 'user', text: 'Hello' },
-        0,
-        true,
-      );
-      expect(mockHistoryManager.addItem).toHaveBeenNthCalledWith(
-        2,
-        { type: 'gemini', text: 'Hi there!' },
-        1,
-        true,
-      );
+      // The history must be applied in one state update to avoid a render
+      // (and flicker) per resumed item.
+      expect(mockHistoryManager.loadHistory).toHaveBeenCalledTimes(1);
+      expect(mockHistoryManager.loadHistory).toHaveBeenCalledWith([
+        { type: 'user', text: 'Hello', id: 1 },
+        { type: 'gemini', text: 'Hi there!', id: 2 },
+      ]);
+      expect(mockHistoryManager.clearItems).not.toHaveBeenCalled();
+      expect(mockHistoryManager.addItem).not.toHaveBeenCalled();
       expect(mockRefreshStatic).toHaveBeenCalledTimes(1);
       expect(mockGeminiClient.resumeChat).toHaveBeenCalledWith(
         clientHistory,
@@ -154,9 +149,43 @@ describe('useSessionResume', () => {
         );
       });
 
+      expect(mockHistoryManager.loadHistory).not.toHaveBeenCalled();
       expect(mockHistoryManager.clearItems).not.toHaveBeenCalled();
       expect(mockHistoryManager.addItem).not.toHaveBeenCalled();
       expect(mockGeminiClient.resumeChat).not.toHaveBeenCalled();
+    });
+
+    it('should skip consecutive duplicate user messages when loading history', async () => {
+      const { result } = await renderHook(() =>
+        useSessionResume(getDefaultProps()),
+      );
+
+      const uiHistory: HistoryItemWithoutId[] = [
+        { type: 'user', text: 'dup' },
+        { type: 'user', text: 'dup' },
+        { type: 'gemini', text: 'ok' },
+      ];
+
+      const resumedData: ResumedSessionData = {
+        conversation: {
+          sessionId: 'test-123',
+          projectHash: 'project-123',
+          startTime: '2025-01-01T00:00:00Z',
+          lastUpdated: '2025-01-01T01:00:00Z',
+          messages: [] as MessageRecord[],
+        },
+        filePath: '/path/to/session.json',
+      };
+
+      await act(async () => {
+        await result.current.loadHistoryForResume(uiHistory, [], resumedData);
+      });
+
+      expect(mockHistoryManager.loadHistory).toHaveBeenCalledWith([
+        { type: 'user', text: 'dup', id: 1 },
+        { type: 'gemini', text: 'ok', id: 3 },
+      ]);
+      expect(mockRefreshStatic).toHaveBeenCalledTimes(1);
     });
 
     it('should handle empty history arrays', async () => {
@@ -179,7 +208,8 @@ describe('useSessionResume', () => {
         await result.current.loadHistoryForResume([], [], resumedData);
       });
 
-      expect(mockHistoryManager.clearItems).toHaveBeenCalled();
+      expect(mockHistoryManager.loadHistory).toHaveBeenCalledWith([]);
+      expect(mockHistoryManager.clearItems).not.toHaveBeenCalled();
       expect(mockHistoryManager.addItem).not.toHaveBeenCalled();
       expect(mockRefreshStatic).toHaveBeenCalledTimes(1);
       expect(mockGeminiClient.resumeChat).toHaveBeenCalledWith([], resumedData);
@@ -305,6 +335,7 @@ describe('useSessionResume', () => {
     it('should not resume when resumedSessionData is not provided', async () => {
       await renderHook(() => useSessionResume(getDefaultProps()));
 
+      expect(mockHistoryManager.loadHistory).not.toHaveBeenCalled();
       expect(mockHistoryManager.clearItems).not.toHaveBeenCalled();
       expect(mockHistoryManager.addItem).not.toHaveBeenCalled();
       expect(mockGeminiClient.resumeChat).not.toHaveBeenCalled();
@@ -409,22 +440,15 @@ describe('useSessionResume', () => {
       });
 
       await waitFor(() => {
-        expect(mockHistoryManager.clearItems).toHaveBeenCalled();
+        expect(mockHistoryManager.loadHistory).toHaveBeenCalled();
       });
 
-      expect(mockHistoryManager.addItem).toHaveBeenCalledTimes(2);
-      expect(mockHistoryManager.addItem).toHaveBeenNthCalledWith(
-        1,
-        { type: 'user', text: 'Hello from resumed session' },
-        0,
-        true,
-      );
-      expect(mockHistoryManager.addItem).toHaveBeenNthCalledWith(
-        2,
-        { type: 'gemini', text: 'Welcome back!' },
-        1,
-        true,
-      );
+      expect(mockHistoryManager.loadHistory).toHaveBeenCalledWith([
+        { type: 'user', text: 'Hello from resumed session', id: 1 },
+        { type: 'gemini', text: 'Welcome back!', id: 2 },
+      ]);
+      expect(mockHistoryManager.clearItems).not.toHaveBeenCalled();
+      expect(mockHistoryManager.addItem).not.toHaveBeenCalled();
       expect(mockRefreshStatic).toHaveBeenCalledTimes(1);
       expect(mockGeminiClient.resumeChat).toHaveBeenCalled();
     });
@@ -465,11 +489,11 @@ describe('useSessionResume', () => {
       });
 
       await waitFor(() => {
-        expect(mockHistoryManager.clearItems).toHaveBeenCalled();
+        expect(mockHistoryManager.loadHistory).toHaveBeenCalled();
       });
 
-      const clearItemsCallCount = (
-        mockHistoryManager.clearItems as ReturnType<typeof vi.fn>
+      const loadHistoryCallCount = (
+        mockHistoryManager.loadHistory as ReturnType<typeof vi.fn>
       ).mock.calls.length;
 
       // Rerender with different refreshStatic
@@ -479,8 +503,8 @@ describe('useSessionResume', () => {
       });
 
       // Should not resume again
-      expect(mockHistoryManager.clearItems).toHaveBeenCalledTimes(
-        clearItemsCallCount,
+      expect(mockHistoryManager.loadHistory).toHaveBeenCalledTimes(
+        loadHistoryCallCount,
       );
     });
 
@@ -536,7 +560,11 @@ describe('useSessionResume', () => {
       ]);
 
       // But UI history should have both
-      expect(mockHistoryManager.addItem).toHaveBeenCalledTimes(2);
+      expect(mockHistoryManager.loadHistory).toHaveBeenCalledTimes(1);
+      expect(mockHistoryManager.loadHistory).toHaveBeenCalledWith([
+        { type: 'user', text: '/help', id: 1 },
+        { type: 'user', text: 'Regular message', id: 2 },
+      ]);
     });
   });
 });
