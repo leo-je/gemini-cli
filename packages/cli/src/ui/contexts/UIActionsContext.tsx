@@ -18,6 +18,7 @@ import type { AuthState } from '../types.js';
 import { type PermissionsDialogProps } from '../components/PermissionsModifyTrustDialog.js';
 import type { SessionInfo } from '../../utils/sessionUtils.js';
 import type { OpenAiEndpointEnv } from '../openai/index.js';
+import type { NewProviderValues } from '../openai/AddProviderDialog.js';
 import { type NewAgentsChoice } from '../components/NewAgentsNotification.js';
 import type { OverageMenuIntent, EmptyWalletIntent } from './UIStateContext.js';
 
@@ -42,6 +43,12 @@ export interface UIActions {
   exitPrivacyNotice: () => void;
   closeSettingsDialog: () => void;
   closeModelDialog: () => void;
+  openProviderDialog: () => void;
+  closeProviderDialog: () => void;
+  handleProviderSelect: (providerId: string) => Promise<void>;
+  openAddProviderDialog: () => void;
+  closeAddProviderDialog: () => void;
+  handleAddProviderSubmit: (values: NewProviderValues) => Promise<void>;
   openVoiceModelDialog: () => void;
   closeVoiceModelDialog: () => void;
   openAgentConfigDialog: (

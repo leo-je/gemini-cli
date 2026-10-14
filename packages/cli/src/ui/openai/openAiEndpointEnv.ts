@@ -75,8 +75,11 @@ export function applyOpenAiEndpointEnv(
 /**
  * Merges the given keys into an existing env file, rewriting values in place so
  * comments and unrelated variables survive.
+ *
+ * Exported because the provider writer persists credentials into the same file
+ * and must merge them the same way; a second implementation would drift.
  */
-function renderEnvFile(
+export function renderEnvFile(
   envPath: string,
   entries: Array<[string, string | undefined]>,
 ): string {

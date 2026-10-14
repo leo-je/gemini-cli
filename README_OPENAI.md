@@ -46,6 +46,83 @@ export GEMINI_OPENAI_MODELID="qwen2.5-coder:14b"
 
 ---
 
+## 多个提供者
+
+环境变量只能描述一个端点。如果你在 OpenRouter、本地 Ollama 和公司网关之间来回切换，把提供者写进用户级文件
+`~/.gemini/openai-providers.json`，就能在会话内切换而不用重启：
+
+```json
+{
+  "providers": [
+    {
+      "id": "openrouter",
+      "label": "OpenRouter",
+      "baseUrl": "https://openrouter.ai/api/v1",
+      "modelId": "openai/gpt-4o",
+      "apiKeyEnv": "OPENROUTER_API_KEY"
+    },
+    {
+      "id": "ollama",
+      "label": "Ollama (local)",
+      "baseUrl": "http://localhost:11434/v1",
+      "modelId": "qwen2.5-coder:14b"
+    }
+  ]
+}
+```
+
+| 字段        | 必需 | 说明                                                                                |
+| :---------- | :--- | :---------------------------------------------------------------------------------- |
+| `id`        | 是   | 唯一标识，需以字母或数字开头，只含字母、数字、`-`、`_`。用于 `/provider use <id>`。 |
+| `baseUrl`   | 是   | 端点根地址，规则与 `GEMINI_OPENAI_BASE_URL` 相同。                                  |
+| `label`     | 否   | 选择器里的显示名，缺省用 `id`。                                                     |
+| `modelId`   | 否   | 该提供者的默认模型。留空则沿用当前模型。                                            |
+| `apiKeyEnv` | 否   | 存放密钥的**环境变量名**。推荐做法：密钥留在 `.env`，这里只写变量名。               |
+| `apiKey`    | 否   | 密钥字面量。仅当文件权限为 `0600` 时才接受，否则启动时报错。                        |
+| `headers`   | 否   | 自定义请求头，校验规则与 `GEMINI_OPENAI_HEADERS` 完全一致。                         |
+
+选择提供者有三种方式，优先级从高到低：
+
+1. 会话内用 `/provider` 选择或 `/provider use <id>` 切换，立即生效，无需重启。
+2. 设置 `GEMINI_OPENAI_PROVIDER=<id>`。
+3. 缺省使用文件中的第一项。
+
+`/provider` 选中后会自动切到该提供者的 `modelId`，之后用 `/model list`
+可以从新端点拉取模型列表并重选；选择结果会写回文件，下次启动沿用。
+
+### 在会话内新增提供者
+
+用 `/provider add` 依次填写四项：**Provider id**、**Base
+URL**、**默认模型**（可留空）、 **API
+key**（可留空，本地服务无需鉴权）。保存后会立即切换到这个新提供者。
+
+API key **不会写进 `openai-providers.json`**。它被写入 `~/.gemini/.env` 的
+`<ID>_API_KEY` 变量，提供者文件里只记录变量名（`apiKeyEnv`）：
+
+```bash
+# ~/.gemini/.env
+OPENROUTER_API_KEY=sk-...
+```
+
+这样密钥继续受 `.env`
+的权限（`0600`）与信任检查保护，提供者文件本身可以安全地查看和分享。合并写入会保留
+`.env` 里原有的注释和其他变量。
+
+<!-- prettier-ignore -->
+> [!NOTE]
+> 若已有同名 id，`/provider add` 会报错并且不写入任何内容——不会留下一个孤儿密钥。
+
+文件不存在时行为与从前完全一致：仍从 `GEMINI_OPENAI_*`
+环境变量读取端点。若文件存在但格式非法，Gemini
+CLI 会报错退出，而不是静默忽略——否则你会连到自己没配置的端点上去。
+
+<!-- prettier-ignore -->
+> [!WARNING]
+> 工作区里的 `.gemini/` 目录可能被提交到版本库。请把 `openai-providers.json`
+> 放在用户级 `~/.gemini/` 下，不要把含有密钥的文件放进项目里。
+
+---
+
 ## 环境变量
 
 | 变量                     | 必需 | 降级来源                 | 说明                                                                                                |

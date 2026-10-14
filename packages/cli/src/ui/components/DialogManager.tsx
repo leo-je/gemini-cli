@@ -16,6 +16,7 @@ import { AuthDialog } from '../auth/AuthDialog.js';
 import { BannedAccountDialog } from '../auth/BannedAccountDialog.js';
 import { ApiAuthDialog } from '../auth/ApiAuthDialog.js';
 import { OpenAiEndpointDialog } from '../openai/index.js';
+import { ProviderDialogs } from '../openai/ProviderDialogs.js';
 import { EditorSettingsDialog } from './EditorSettingsDialog.js';
 import { PrivacyNotice } from '../privacy/PrivacyNotice.js';
 import { ProQuotaDialog } from './ProQuotaDialog.js';
@@ -246,6 +247,18 @@ export const DialogManager = ({
       <ModelDialog
         onClose={uiActions.closeModelDialog}
         openAiEndpoint={uiState.openAiModelEndpoint}
+      />
+    );
+  }
+  if (uiState.isProviderDialogOpen || uiState.isAddProviderDialogOpen) {
+    return (
+      <ProviderDialogs
+        isProviderDialogOpen={uiState.isProviderDialogOpen}
+        isAddProviderDialogOpen={uiState.isAddProviderDialogOpen}
+        onCloseProvider={uiActions.closeProviderDialog}
+        onSelectProvider={uiActions.handleProviderSelect}
+        onCancelAddProvider={uiActions.closeAddProviderDialog}
+        onSubmitAddProvider={uiActions.handleAddProviderSubmit}
       />
     );
   }

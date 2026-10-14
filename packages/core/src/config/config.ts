@@ -30,6 +30,11 @@ import {
   OPENAI_MODEL_ID_FALLBACK_ENV,
   readEnvWithFallback,
 } from '../core/openai/constants.js';
+import {
+  providerPinnedModelId,
+  switchProvider,
+} from '../core/openai/integration.js';
+import { getErrorMessage } from '../utils/errors.js';
 import type { OverageStrategy } from '../billing/billing.js';
 import { PromptRegistry } from '../prompts/prompt-registry.js';
 import { ResourceRegistry } from '../resources/resource-registry.js';
@@ -785,6 +790,8 @@ export class Config implements McpContext, AgentLoopContext {
   readonly topicState = new TopicState();
   private contentGeneratorConfig!: ContentGeneratorConfig;
   private contentGenerator!: ContentGenerator;
+  /** Set by `/provider`; read when building the OpenAI content generator. */
+  private activeOpenAiProviderId?: string;
   readonly modelConfigService: ModelConfigService;
   private readonly embeddingModel: string;
   private readonly sandbox: SandboxConfig | undefined;
@@ -1630,11 +1637,15 @@ export class Config implements McpContext, AgentLoopContext {
     // telemetry, and the outgoing request all agree. `isTemporary` avoids
     // persisting it over the user's Gemini model setting.
     if (authMethod === AuthType.USE_OPENAI) {
-      const openaiModelId = readEnvWithFallback(
-        OPENAI_MODEL_ID_ENV,
-        OPENAI_MODEL_ID_FALLBACK_ENV,
-        this.env,
-      );
+      // A provider profile can pin its own model, which outranks the ambient
+      // variable; the resolution lives in the isolation module.
+      const openaiModelId =
+        providerPinnedModelId(this.contentGeneratorConfig) ??
+        readEnvWithFallback(
+          OPENAI_MODEL_ID_ENV,
+          OPENAI_MODEL_ID_FALLBACK_ENV,
+          this.env,
+        );
       if (openaiModelId) {
         this.setModel(openaiModelId);
       }
@@ -1939,6 +1950,41 @@ export class Config implements McpContext, AgentLoopContext {
 
   getContentGeneratorConfig(): ContentGeneratorConfig {
     return this.contentGeneratorConfig;
+  }
+
+  /**
+   * The provider profile chosen for this session, if any.
+   *
+   * Set by `/provider` and read when the OpenAI content generator config is
+   * built. It is intentionally session-scoped: the persisted default lives in
+   * the provider file and in `GEMINI_OPENAI_PROVIDER`, so nothing here needs to
+   * survive a restart.
+   */
+  getActiveOpenAiProviderId(): string | undefined {
+    return this.activeOpenAiProviderId;
+  }
+
+  setActiveOpenAiProvider(providerId: string | undefined): void {
+    this.activeOpenAiProviderId = providerId;
+  }
+
+  /**
+   * Switches the session to a configured OpenAI-compatible provider.
+   *
+   * A thin delegation: the logic lives in the isolation module so this upstream
+   * class gains only a call site (see core/openai/integration.ts).
+   */
+  async switchOpenAiProvider(providerId: string): Promise<void> {
+    await switchProvider({
+      currentAuthType: this.contentGeneratorConfig?.authType,
+      providerId,
+      env: this.env,
+      setActiveProviderId: (id) => this.setActiveOpenAiProvider(id),
+      refreshAuth: (authType, apiKey, baseUrl, headers) =>
+        this.refreshAuth(authType, apiKey, baseUrl, headers),
+      setModel: (modelId) => this.setModel(modelId),
+      getErrorMessage,
+    });
   }
 
   getModel(): string {

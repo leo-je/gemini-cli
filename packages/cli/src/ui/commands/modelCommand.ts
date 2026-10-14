@@ -73,7 +73,6 @@ const listModelsCommand: SlashCommand = {
     const config = context.services.agentContext?.config;
     if (!config) return;
 
-    const baseUrl = config.getContentGeneratorConfig()?.baseUrl;
     if (!isOpenAiBackend(config)) {
       context.ui.addItem({
         type: MessageType.INFO,
@@ -81,12 +80,25 @@ const listModelsCommand: SlashCommand = {
       });
       return;
     }
+
+    // The endpoint always comes from the active content generator rather than
+    // from the provider file, so a provider switched this session is reflected
+    // here without any extra bookkeeping.
+    const baseUrl = config.getContentGeneratorConfig()?.baseUrl;
     if (!baseUrl) {
       context.ui.addItem({
         type: MessageType.ERROR,
-        text: 'No OpenAI-compatible endpoint is configured. Set GEMINI_OPENAI_BASE_URL.',
+        text: 'No OpenAI-compatible endpoint is configured. Set GEMINI_OPENAI_BASE_URL or add a provider with /provider add.',
       });
       return;
+    }
+
+    const providerId = config.getActiveOpenAiProviderId();
+    if (providerId) {
+      context.ui.addItem({
+        type: MessageType.INFO,
+        text: `Listing models served by provider "${providerId}" (${baseUrl}).`,
+      });
     }
 
     return {

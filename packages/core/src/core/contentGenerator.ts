@@ -33,14 +33,8 @@ import type { LlmRole } from '../telemetry/llmRole.js';
 import { ModelMappingContentGenerator } from './modelMappingContentGenerator.js';
 import { getBackendModelMappings } from '../config/models.js';
 import { OpenAIContentGenerator } from './openai/openaiContentGenerator.js';
-import {
-  OPENAI_API_KEY_ENV,
-  OPENAI_API_KEY_FALLBACK_ENV,
-  OPENAI_BASE_URL_ENV,
-  OPENAI_BASE_URL_FALLBACK_ENV,
-  GEMINI_API_TYPE_ENV,
-  OPENAI_API_TYPE,
-} from './openai/constants.js';
+import { GEMINI_API_TYPE_ENV, OPENAI_API_TYPE } from './openai/constants.js';
+import { applyProviderToContentGeneratorConfig } from './openai/integration.js';
 
 /**
  * Interface abstracting the core functionalities for generating content and counting tokens.
@@ -175,6 +169,10 @@ export type ContentGeneratorConfig = {
   baseUrl?: string;
   customHeaders?: Record<string, string>;
   vertexAiRouting?: VertexAiRoutingConfig;
+  /** OpenAI mode: the active provider profile id, when one is configured. */
+  providerId?: string;
+  /** OpenAI mode: the provider profile's configured default model. */
+  modelId?: string;
 };
 
 export type VertexAiRequestType = 'dedicated' | 'shared';
@@ -238,22 +236,17 @@ export async function createContentGeneratorConfig(
     authType === AuthType.USE_OPENAI
   ) {
     if (authType === AuthType.USE_OPENAI) {
-      // Credentials come from their own env vars. An empty key is legitimate
-      // here because local servers (Ollama, LM Studio) usually accept
-      // unauthenticated requests. Each value falls back to the name the Gemini
-      // path already uses, so a configuration written before the
-      // `GEMINI_OPENAI_*` prefix keeps working; the OpenAI-named variable wins
-      // whenever it is set.
-      contentGeneratorConfig.apiKey =
-        apiKey ||
-        getEnv(OPENAI_API_KEY_ENV) ||
-        getEnv(OPENAI_API_KEY_FALLBACK_ENV) ||
-        '';
-      contentGeneratorConfig.baseUrl =
-        baseUrl ||
-        getEnv(OPENAI_BASE_URL_ENV) ||
-        getEnv(OPENAI_BASE_URL_FALLBACK_ENV) ||
-        '';
+      // Everything provider-related lives in the isolation module so this file
+      // keeps an upstream-shaped diff (see core/openai/integration.ts).
+      applyProviderToContentGeneratorConfig({
+        config,
+        authType,
+        contentGeneratorConfig,
+        apiKey,
+        baseUrl,
+        customHeaders,
+        getEnv,
+      });
       contentGeneratorConfig.vertexai = false;
     }
     return contentGeneratorConfig;

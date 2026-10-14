@@ -36,6 +36,7 @@ import {
   MCPDiscoveryState,
   CoreToolCallStatus,
 } from '@google/gemini-cli-core';
+import { handleProviderDialogProps } from '../openai/providerDialogRouting.js';
 import { useSessionStats } from '../contexts/SessionContext.js';
 import type {
   Message,
@@ -72,6 +73,8 @@ interface SlashCommandProcessorActions {
   openSettingsDialog: () => void;
   openSessionBrowser: () => void;
   openModelDialog: (openAiEndpoint?: string) => void;
+  openProviderDialog: () => void;
+  openAddProviderDialog: () => void;
   openVoiceModelDialog: () => void;
   openAgentConfigDialog: (
     name: string,
@@ -506,6 +509,12 @@ export const useSlashCommandProcessor = (
                     case 'model':
                       // `/model list` reuses this dialog and passes the endpoint
                       // as a prop, so no second dialog kind is needed.
+                      // The fork's provider dialogs are routed through here too
+                      // (see `handleProviderDialogProps`) to avoid editing the
+                      // upstream dialog union and switch.
+                      if (handleProviderDialogProps(result.props, actions)) {
+                        return { type: 'handled' };
+                      }
                       actions.openModelDialog(
                         typeof result.props?.['openAiEndpoint'] === 'string'
                           ? result.props['openAiEndpoint']

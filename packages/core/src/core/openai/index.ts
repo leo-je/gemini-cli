@@ -14,6 +14,8 @@
 
 export * from './types.js';
 export * from './constants.js';
+export * from './providers.js';
+export * from './integration.js';
 export * from './converters.js';
 export * from './openaiClient.js';
 export * from './openaiContentGenerator.js';

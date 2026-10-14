@@ -69,7 +69,7 @@ export function readEnvValue(
 }
 
 /** RFC 9110 field-name: a `tchar` run. Anything else is rejected by `fetch`. */
-const HEADER_NAME_PATTERN = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/;
+export const HEADER_NAME_PATTERN = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/;
 
 /**
  * Parses `GEMINI_OPENAI_HEADERS`, a flat JSON object of header names to values.
@@ -138,14 +138,18 @@ export function parseHeaderJson(
  * and `{"X-Retries": 3}` is an easy thing to type. Objects and arrays are
  * rejected: there is no sensible header serialization for them.
  */
-function toHeaderValue(name: string, value: unknown): string {
+export function toHeaderValue(
+  name: string,
+  value: unknown,
+  source: string = OPENAI_HEADERS_ENV,
+): string {
   if (
     typeof value !== 'string' &&
     typeof value !== 'number' &&
     typeof value !== 'boolean'
   ) {
     throw new Error(
-      `${OPENAI_HEADERS_ENV} header ${JSON.stringify(name)} must be a string, number, or boolean.`,
+      `${source} header ${JSON.stringify(name)} must be a string, number, or boolean.`,
     );
   }
 
@@ -156,7 +160,7 @@ function toHeaderValue(name: string, value: unknown): string {
     // LF are the header-injection vector, letting a value forge extra headers.
     if ((code < 0x20 && code !== 0x09) || code === 0x7f) {
       throw new Error(
-        `${OPENAI_HEADERS_ENV} header ${JSON.stringify(name)} contains a control character, which is never valid in a header value.`,
+        `${source} header ${JSON.stringify(name)} contains a control character, which is never valid in a header value.`,
       );
     }
     // Above U+00FF there is no byte to carry the character, and `fetch` throws
@@ -166,7 +170,7 @@ function toHeaderValue(name: string, value: unknown): string {
     // neither the header nor the variable.
     if (code > 0xff) {
       throw new Error(
-        `${OPENAI_HEADERS_ENV} header ${JSON.stringify(name)} contains ${JSON.stringify(char)}, which has no Latin-1 representation. Header values are bytes; encode it first (for example as percent-encoded UTF-8).`,
+        `${source} header ${JSON.stringify(name)} contains ${JSON.stringify(char)}, which has no Latin-1 representation. Header values are bytes; encode it first (for example as percent-encoded UTF-8).`,
       );
     }
   }

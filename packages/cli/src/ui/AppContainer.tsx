@@ -102,6 +102,12 @@ import { useQuotaAndFallback } from './hooks/useQuotaAndFallback.js';
 import { useEditorSettings } from './hooks/useEditorSettings.js';
 import { useSettingsCommand } from './hooks/useSettingsCommand.js';
 import { useModelCommand } from './hooks/useModelCommand.js';
+import { useProviderCommand } from './hooks/useProviderCommand.js';
+import { useProviderDialogHandlers } from './openai/useProviderDialogHandlers.js';
+import {
+  applyOpenAiEndpointEnv,
+  type OpenAiEndpointEnv,
+} from './openai/index.js';
 import { useVoiceModelCommand } from './hooks/useVoiceModelCommand.js';
 import { useSlashCommandProcessor } from './hooks/slashCommandProcessor.js';
 import { useVimMode } from './contexts/VimModeContext.js';
@@ -144,10 +150,6 @@ import {
 } from '../utils/cleanup.js';
 import { relaunchApp } from '../utils/processUtils.js';
 import type { SessionInfo } from '../utils/sessionUtils.js';
-import {
-  applyOpenAiEndpointEnv,
-  type OpenAiEndpointEnv,
-} from './openai/index.js';
 import { useMessageQueue } from './hooks/useMessageQueue.js';
 import { useMcpStatus } from './hooks/useMcpStatus.js';
 import { useApprovalModeIndicator } from './hooks/useApprovalModeIndicator.js';
@@ -983,6 +985,23 @@ Logging in with Google... Restarting Gemini CLI to continue.
   } = useModelCommand();
 
   const {
+    isProviderDialogOpen,
+    openProviderDialog,
+    closeProviderDialog,
+    isAddProviderDialogOpen,
+    openAddProviderDialog,
+    closeAddProviderDialog,
+  } = useProviderCommand();
+
+  const { handleProviderSelect, handleAddProviderSubmit } =
+    useProviderDialogHandlers({
+      config,
+      historyManager,
+      closeProviderDialog,
+      closeAddProviderDialog,
+    });
+
+  const {
     isVoiceModelDialogOpen,
     openVoiceModelDialog,
     closeVoiceModelDialog,
@@ -1011,6 +1030,8 @@ Logging in with Google... Restarting Gemini CLI to continue.
       openSettingsDialog,
       openSessionBrowser,
       openModelDialog,
+      openProviderDialog,
+      openAddProviderDialog,
       openVoiceModelDialog,
       openAgentConfigDialog,
       openPermissionsDialog,
@@ -1050,6 +1071,8 @@ Logging in with Google... Restarting Gemini CLI to continue.
       openSettingsDialog,
       openSessionBrowser,
       openModelDialog,
+      openProviderDialog,
+      openAddProviderDialog,
       openVoiceModelDialog,
       openAgentConfigDialog,
       setQuittingMessages,
@@ -1850,6 +1873,8 @@ Logging in with Google... Restarting Gemini CLI to continue.
     isThemeDialogOpen ||
     isSettingsDialogOpen ||
     isModelDialogOpen ||
+    isProviderDialogOpen ||
+    isAddProviderDialogOpen ||
     isVoiceModelDialogOpen ||
     isAgentConfigDialogOpen ||
     isPermissionsDialogOpen ||
@@ -2513,6 +2538,8 @@ Logging in with Google... Restarting Gemini CLI to continue.
       isSessionBrowserOpen,
       isModelDialogOpen,
       openAiModelEndpoint,
+      isProviderDialogOpen,
+      isAddProviderDialogOpen,
       isVoiceModelDialogOpen,
       isAgentConfigDialogOpen,
       selectedAgentName,
@@ -2628,6 +2655,8 @@ Logging in with Google... Restarting Gemini CLI to continue.
       isSessionBrowserOpen,
       isModelDialogOpen,
       openAiModelEndpoint,
+      isProviderDialogOpen,
+      isAddProviderDialogOpen,
       isVoiceModelDialogOpen,
       isAgentConfigDialogOpen,
       selectedAgentName,
@@ -2745,6 +2774,12 @@ Logging in with Google... Restarting Gemini CLI to continue.
       exitPrivacyNotice,
       closeSettingsDialog,
       closeModelDialog,
+      openProviderDialog,
+      openAddProviderDialog,
+      closeProviderDialog,
+      handleProviderSelect,
+      closeAddProviderDialog,
+      handleAddProviderSubmit,
       openVoiceModelDialog,
       closeVoiceModelDialog,
       openAgentConfigDialog,
@@ -2849,6 +2884,12 @@ Logging in with Google... Restarting Gemini CLI to continue.
       exitPrivacyNotice,
       closeSettingsDialog,
       closeModelDialog,
+      openProviderDialog,
+      openAddProviderDialog,
+      closeProviderDialog,
+      handleProviderSelect,
+      closeAddProviderDialog,
+      handleAddProviderSubmit,
       openVoiceModelDialog,
       closeVoiceModelDialog,
       openAgentConfigDialog,

@@ -121,6 +121,10 @@ export interface UIState {
    * instead of the Gemini models. Undefined for `/model`.
    */
   openAiModelEndpoint?: string;
+  /** Whether the `/provider` picker is showing. */
+  isProviderDialogOpen: boolean;
+  /** Whether the `/provider add` form is showing. */
+  isAddProviderDialogOpen: boolean;
   isVoiceModelDialogOpen: boolean;
   isAgentConfigDialogOpen: boolean;
   selectedAgentName?: string;
