@@ -16,6 +16,8 @@
 
 import {
   AuthType,
+  isOpenAiApiTypeSwitch,
+  isOpenAiProviderBackend,
   OpenAICompatibleClient,
   type Config,
 } from '@google/gemini-cli-core';
@@ -31,9 +33,15 @@ export interface RemoteModelListing {
 
 /**
  * Whether this session talks to an OpenAI-compatible endpoint.
+ *
+ * Delegates to the isolation module, which consults both the config's auth type
+ * and the explicit `GEMINI_API_TYPE=openai` switch. Those disagree during
+ * startup — the auth type is only populated once `refreshAuth` has run — so
+ * checking the config alone made `/provider` and `/model list` report the mode
+ * as off for a user who had just switched it on.
  */
 export function isOpenAiBackend(config: Config | undefined): boolean {
-  return config?.getContentGeneratorConfig()?.authType === AuthType.USE_OPENAI;
+  return isOpenAiProviderBackend(config, isOpenAiApiTypeSwitch);
 }
 
 /**
