@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { modelCommand } from './modelCommand.js';
 import { type CommandContext } from './types.js';
 import { createMockCommandContext } from '../../test-utils/mockCommandContext.js';
@@ -15,7 +15,14 @@ describe('modelCommand', () => {
   let mockContext: CommandContext;
 
   beforeEach(() => {
+    // The OpenAI-mode check also consults GEMINI_API_TYPE, so clear it and let
+    // each case's fake config decide.
+    vi.stubEnv('GEMINI_API_TYPE', '');
     mockContext = createMockCommandContext();
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
   });
 
   it('should return a dialog action to open the model dialog when no args', async () => {
@@ -173,9 +180,11 @@ describe('modelCommand', () => {
   describe('list subcommand', () => {
     function configWith(
       generatorConfig: Record<string, unknown> | undefined,
+      providerId?: string,
     ): CommandContext['services']['agentContext'] {
       return {
         getContentGeneratorConfig: vi.fn().mockReturnValue(generatorConfig),
+        getActiveOpenAiProviderId: vi.fn().mockReturnValue(providerId),
         get config() {
           return this;
         },
@@ -202,6 +211,29 @@ describe('modelCommand', () => {
         dialog: 'model',
         props: { openAiEndpoint: 'https://openrouter.ai/api/v1' },
       });
+    });
+
+    it('names the active provider before listing its models', async () => {
+      const listCommand = modelCommand.subCommands?.find(
+        (c) => c.name === 'list',
+      );
+
+      mockContext.services.agentContext = configWith(
+        {
+          authType: AuthType.USE_OPENAI,
+          baseUrl: 'https://openrouter.ai/api/v1',
+        },
+        'openrouter',
+      );
+
+      await listCommand!.action!(mockContext, '');
+
+      expect(mockContext.ui.addItem).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: MessageType.INFO,
+          text: expect.stringContaining('openrouter') as string,
+        }),
+      );
     });
 
     it('should decline outside OpenAI-compatible mode', async () => {

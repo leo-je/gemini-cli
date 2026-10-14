@@ -160,6 +160,7 @@ vi.mock('../config/auth.js', () => ({
 vi.mock('./hooks/useEditorSettings.js');
 vi.mock('./hooks/useSettingsCommand.js');
 vi.mock('./hooks/useModelCommand.js');
+vi.mock('./hooks/useProviderCommand.js');
 vi.mock('./hooks/slashCommandProcessor.js');
 vi.mock('./hooks/useConsoleMessages.js');
 vi.mock('./hooks/useTerminalSize.js', () => ({
@@ -228,6 +229,7 @@ import { validateAuthMethod } from '../config/auth.js';
 import { useEditorSettings } from './hooks/useEditorSettings.js';
 import { useSettingsCommand } from './hooks/useSettingsCommand.js';
 import { useModelCommand } from './hooks/useModelCommand.js';
+import { useProviderCommand } from './hooks/useProviderCommand.js';
 import { useSlashCommandProcessor } from './hooks/slashCommandProcessor.js';
 import { useErrorCount } from './hooks/useConsoleMessages.js';
 import { useGeminiStream } from './hooks/useGeminiStream.js';
@@ -312,6 +314,7 @@ describe('AppContainer State Management', () => {
   const mockedUseEditorSettings = useEditorSettings as Mock;
   const mockedUseSettingsCommand = useSettingsCommand as Mock;
   const mockedUseModelCommand = useModelCommand as Mock;
+  const mockedUseProviderCommand = useProviderCommand as Mock;
   const mockedUseSlashCommandProcessor = useSlashCommandProcessor as Mock;
   const mockedUseConsoleMessages = useErrorCount as Mock;
   const mockedUseGeminiStream = useGeminiStream as Mock;
@@ -406,6 +409,14 @@ describe('AppContainer State Management', () => {
       isModelDialogOpen: false,
       openModelDialog: vi.fn(),
       closeModelDialog: vi.fn(),
+    });
+    mockedUseProviderCommand.mockReturnValue({
+      isProviderDialogOpen: false,
+      openProviderDialog: vi.fn(),
+      closeProviderDialog: vi.fn(),
+      isAddProviderDialogOpen: false,
+      openAddProviderDialog: vi.fn(),
+      closeAddProviderDialog: vi.fn(),
     });
     mockedUseSlashCommandProcessor.mockReturnValue({
       handleSlashCommand: vi.fn(),
@@ -2770,6 +2781,53 @@ describe('AppContainer State Management', () => {
           unmount();
         });
       }
+    });
+  });
+
+  describe('Provider Dialog Integration', () => {
+    it('should make dialogs visible when the provider picker is open', async () => {
+      // Regression: the dialog state was set but `dialogsVisible` did not
+      // include it, so the layout kept rendering the Composer and the picker
+      // never appeared.
+      mockedUseProviderCommand.mockReturnValue({
+        isProviderDialogOpen: true,
+        openProviderDialog: vi.fn(),
+        closeProviderDialog: vi.fn(),
+        isAddProviderDialogOpen: false,
+        openAddProviderDialog: vi.fn(),
+        closeAddProviderDialog: vi.fn(),
+      });
+
+      const { unmount } = await act(async () => renderAppContainer());
+
+      expect(capturedUIState.isProviderDialogOpen).toBe(true);
+      expect(capturedUIState.dialogsVisible).toBe(true);
+      unmount();
+    });
+
+    it('should make dialogs visible when the add-provider form is open', async () => {
+      mockedUseProviderCommand.mockReturnValue({
+        isProviderDialogOpen: false,
+        openProviderDialog: vi.fn(),
+        closeProviderDialog: vi.fn(),
+        isAddProviderDialogOpen: true,
+        openAddProviderDialog: vi.fn(),
+        closeAddProviderDialog: vi.fn(),
+      });
+
+      const { unmount } = await act(async () => renderAppContainer());
+
+      expect(capturedUIState.isAddProviderDialogOpen).toBe(true);
+      expect(capturedUIState.dialogsVisible).toBe(true);
+      unmount();
+    });
+
+    it('should keep dialogs hidden when neither provider dialog is open', async () => {
+      const { unmount } = await act(async () => renderAppContainer());
+
+      expect(capturedUIState.isProviderDialogOpen).toBe(false);
+      expect(capturedUIState.isAddProviderDialogOpen).toBe(false);
+      unmount();
     });
   });
 

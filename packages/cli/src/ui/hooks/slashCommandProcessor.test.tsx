@@ -10,6 +10,7 @@ import { renderHook } from '../../test-utils/render.js';
 import { waitFor } from '../../test-utils/async.js';
 import { useSlashCommandProcessor } from './slashCommandProcessor.js';
 import { CommandKind, type SlashCommand } from '../commands/types.js';
+import { providerCommand } from '../commands/providerCommand.js';
 import type { LoadedSettings } from '../../config/settings.js';
 import { MessageType } from '../types.js';
 import { BuiltinCommandLoader } from '../../services/BuiltinCommandLoader.js';
@@ -162,6 +163,7 @@ describe('useSlashCommandProcessor', () => {
       mcpCommands?: SlashCommand[];
       setIsProcessing?: (isProcessing: boolean) => void;
       refreshStatic?: () => void;
+      openAddProviderDialog?: () => void;
       openAgentConfigDialog?: (
         name: string,
         displayName: string,
@@ -175,6 +177,7 @@ describe('useSlashCommandProcessor', () => {
       mcpCommands = [],
       setIsProcessing = vi.fn(),
       refreshStatic = vi.fn(),
+      openAddProviderDialog = vi.fn(),
       openAgentConfigDialog = vi.fn(),
     } = options;
 
@@ -205,6 +208,8 @@ describe('useSlashCommandProcessor', () => {
             openSettingsDialog: vi.fn(),
             openSessionBrowser: vi.fn(),
             openModelDialog: mockOpenModelDialog,
+            openProviderDialog: vi.fn(),
+            openAddProviderDialog,
             openVoiceModelDialog: vi.fn(),
             openAgentConfigDialog,
             openPermissionsDialog: vi.fn(),
@@ -536,6 +541,30 @@ describe('useSlashCommandProcessor', () => {
           expect(mockFn).toHaveBeenCalled();
         },
       );
+
+      it('should open the add-provider form for "/provider add"', async () => {
+        // Regression: `/provider add` printed "only available in
+        // OpenAI-compatible mode" and opened nothing, because the mode check
+        // read an auth type that is not resolved until after startup. The
+        // switch itself is stubbed rather than a resolved config, which is
+        // exactly the state a user is in when they type the command.
+        vi.stubEnv('GEMINI_API_TYPE', 'openai');
+        const openAddProviderDialog = vi.fn();
+        const result = await setupProcessorHook({
+          builtinCommands: [providerCommand],
+          openAddProviderDialog,
+        });
+        await waitFor(() =>
+          expect(result.current.slashCommands).toHaveLength(1),
+        );
+
+        await act(async () => {
+          await result.current.handleSlashCommand('/provider add');
+        });
+
+        expect(openAddProviderDialog).toHaveBeenCalled();
+        vi.unstubAllEnvs();
+      });
 
       it('should forward the OpenAI endpoint to the model dialog', async () => {
         // `/model list` reuses the model dialog; without this the endpoint

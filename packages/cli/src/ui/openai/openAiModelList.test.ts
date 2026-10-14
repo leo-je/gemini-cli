@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { describe, it, expect, vi, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { AuthType, type Config } from '@google/gemini-cli-core';
 import { fetchRemoteModels, isOpenAiBackend } from './openAiModelList.js';
 
@@ -15,6 +15,16 @@ function configWith(generatorConfig: Record<string, unknown>): Config {
 }
 
 describe('isOpenAiBackend', () => {
+  beforeEach(() => {
+    // The check also consults the explicit switch, so the ambient environment
+    // must not decide the outcome of these cases.
+    vi.stubEnv('GEMINI_API_TYPE', '');
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
   it('is true only for the OpenAI-compatible backend', () => {
     expect(isOpenAiBackend(configWith({ authType: AuthType.USE_OPENAI }))).toBe(
       true,
@@ -23,6 +33,19 @@ describe('isOpenAiBackend', () => {
       false,
     );
     expect(isOpenAiBackend(undefined)).toBe(false);
+  });
+
+  it('is true when GEMINI_API_TYPE=openai has not been resolved onto the config yet', () => {
+    // Regression: `/provider add` reported the mode as off and opened nothing
+    // because the auth type is only populated after refreshAuth runs.
+    vi.stubEnv('GEMINI_API_TYPE', 'openai');
+    expect(isOpenAiBackend(configWith({}))).toBe(true);
+    expect(isOpenAiBackend(undefined)).toBe(true);
+  });
+
+  it('ignores a non-openai GEMINI_API_TYPE', () => {
+    vi.stubEnv('GEMINI_API_TYPE', 'gemini');
+    expect(isOpenAiBackend(configWith({}))).toBe(false);
   });
 });
 
