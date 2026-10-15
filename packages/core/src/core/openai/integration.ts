@@ -135,6 +135,45 @@ export function resolveActiveProvider(options: {
 }
 
 /**
+ * Whether a provider profile can stand in for the missing `GEMINI_OPENAI_*`
+ * environment variables.
+ *
+ * Used by the CLI's auth gate: a user whose endpoint lives only in the
+ * provider file (chosen via `GEMINI_OPENAI_PROVIDER` or the file's first
+ * entry) must not be forced through the endpoint dialog the single-endpoint
+ * mode needs. Both a base URL and a model id are required — the dialog
+ * collects exactly those two, and a provider without a model id cannot
+ * satisfy what the dialog would have provided.
+ *
+ * Deliberately swallow errors: a malformed provider file must degrade to
+ * "not configured" (the dialog) rather than become a new startup failure.
+ * This is only ever called from the OpenAI auth path, so reading the file
+ * here keeps the no-implicit-read rule of `resolveActiveProvider` intact.
+ */
+export function hasResolvableOpenAiProvider(
+  env?: Record<string, string | undefined>,
+  filePath?: string,
+): boolean {
+  try {
+    // Callers often hold `process.env`, whose values may be undefined;
+    // resolveProvider's contract takes defined strings only, so drop the
+    // holes instead of widening every resolver signature.
+    const cleanEnv = env
+      ? Object.fromEntries(
+          Object.entries(env).filter(
+            (entry): entry is [string, string] => entry[1] !== undefined,
+          ),
+        )
+      : undefined;
+    const requestedId = cleanEnv?.[OPENAI_PROVIDER_ENV];
+    const profile = resolveProvider(requestedId, filePath, cleanEnv);
+    return Boolean(profile?.baseUrl && profile?.modelId);
+  } catch {
+    return false;
+  }
+}
+
+/**
  * The model a provider profile pins, if any.
  *
  * Read by `refreshAuth` so a provider's own default outranks

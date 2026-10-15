@@ -7,6 +7,7 @@
 import {
   AuthType,
   loadApiKey,
+  hasResolvableOpenAiProvider,
   OPENAI_BASE_URL_ENV,
   OPENAI_BASE_URL_FALLBACK_ENV,
   OPENAI_MODEL_ID_ENV,
@@ -36,7 +37,15 @@ export function isOpenAiEndpointConfigured(): boolean {
     process.env[OPENAI_MODEL_ID_ENV] ||
       process.env[OPENAI_MODEL_ID_FALLBACK_ENV],
   );
-  return hasBaseUrl && hasModelId;
+  if (hasBaseUrl && hasModelId) {
+    return true;
+  }
+  // A provider profile (openai-providers.json, selected via
+  // GEMINI_OPENAI_PROVIDER or the file's first entry) is an equally valid
+  // endpoint configuration. It carries no environment variables, so without
+  // this check a provider-only setup would be sent to the endpoint dialog
+  // on every start.
+  return hasResolvableOpenAiProvider({ ...process.env });
 }
 
 export async function validateAuthMethod(
@@ -78,6 +87,17 @@ export async function validateAuthMethod(
   }
 
   if (authMethod === AuthType.USE_OPENAI) {
+    // A resolvable provider profile satisfies the endpoint requirements on
+    // its own; the environment-variable checks below describe the
+    // single-endpoint configuration only.
+    if (hasResolvableOpenAiProvider({ ...process.env })) {
+      try {
+        parseHeaderJson(process.env['GEMINI_OPENAI_HEADERS']);
+      } catch (error) {
+        return error instanceof Error ? error.message : String(error);
+      }
+      return null;
+    }
     // Each setting falls back to the name the Gemini path already uses, so a
     // configuration written before the `GEMINI_OPENAI_*` prefix keeps working.
     // The OpenAI-named variable wins whenever it is set.
