@@ -1181,6 +1181,9 @@ Logging in with Google... Restarting Gemini CLI to continue.
       // Fork-owned: the hook writes the chosen provider back so it survives a
       // restart (see `openai/openAiProviderPreference.ts`).
       settings,
+      // Fork-owned: a provider with no default model opens the endpoint's model
+      // list right away, so the session is not left unable to send a message.
+      openModelDialog,
       closeProviderDialog,
       closeAddProviderDialog,
     });

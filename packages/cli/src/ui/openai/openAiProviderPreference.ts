@@ -29,6 +29,7 @@ import {
   type LoadableSettingScope,
   type MergedSettings,
 } from '../../config/settings.js';
+import { loadProviderEntries } from '@google/gemini-cli-core';
 
 /** The persisted provider choice, under `security.auth`. */
 export const OPENAI_PROVIDER_SETTING_KEY = 'security.auth.openAiProviderId';
@@ -84,5 +85,32 @@ export function persistProviderId(
     );
   } catch {
     // Ignored on purpose; see the doc comment above.
+  }
+}
+
+/**
+ * Whether a provider declares a default model.
+ *
+ * A provider without one is supported by design — the session is meant to pick
+ * from the endpoint's catalog — but nothing used to ask for that pick, so the
+ * next message failed with a message about environment variables. The caller
+ * uses this to open the model list right after a switch.
+ *
+ * Anything unreadable or unrecognizable reports `true`, so the caller takes the
+ * ordinary path. This only runs after a switch succeeded, so a provider that
+ * cannot be found here means the file changed underneath the session, and
+ * guessing "no default model" would open a list for the wrong reason.
+ */
+export function providerHasDefaultModel(providerId: string): boolean {
+  try {
+    const entry = loadProviderEntries().find(
+      (candidate) => candidate.id === providerId,
+    );
+    if (!entry) {
+      return true;
+    }
+    return Boolean(entry.modelId);
+  } catch {
+    return true;
   }
 }

@@ -12,7 +12,10 @@ import {
 import { MessageType } from '../types.js';
 import { isOpenAiBackend } from '../openai/index.js';
 import { providerDialogAction } from '../openai/providerDialogRouting.js';
-import { persistProviderId } from '../openai/openAiProviderPreference.js';
+import {
+  persistProviderId,
+  providerHasDefaultModel,
+} from '../openai/openAiProviderPreference.js';
 
 const listProvidersCommand: SlashCommand = {
   name: 'list',
@@ -43,7 +46,7 @@ const useProviderCommand: SlashCommand = {
   autoExecute: false,
   action: async (context: CommandContext, args: string) => {
     const config = context.services.agentContext?.config;
-    if (!config) return;
+    if (!config) return undefined;
 
     const id = args.trim();
     if (!id) {
@@ -51,7 +54,7 @@ const useProviderCommand: SlashCommand = {
         type: MessageType.ERROR,
         text: 'Usage: /provider use <provider-id>',
       });
-      return;
+      return undefined;
     }
 
     if (!isOpenAiBackend(config)) {
@@ -59,7 +62,7 @@ const useProviderCommand: SlashCommand = {
         type: MessageType.INFO,
         text: '/provider is only available in OpenAI-compatible mode. Set GEMINI_API_TYPE=openai.',
       });
-      return;
+      return undefined;
     }
 
     // Switching rebuilds the content generator; opening the picker instead is
@@ -69,10 +72,29 @@ const useProviderCommand: SlashCommand = {
     // the selection only lived in memory and every restart fell back to the
     // provider file's first entry.
     persistProviderId(context.services.settings, id);
+
+    // A provider with no default model cannot send a message until one is
+    // chosen, so ask for it here rather than leaving a session that fails on the
+    // next prompt. The dialog action is the one `/model list` uses.
+    if (!providerHasDefaultModel(id)) {
+      context.ui.addItem({
+        type: MessageType.INFO,
+        text: `Provider switched to ${id}. It has no default model, so pick one from the list.`,
+      });
+      return {
+        type: 'dialog',
+        dialog: 'model',
+        props: {
+          openAiEndpoint: config.getContentGeneratorConfig()?.baseUrl,
+        },
+      };
+    }
+
     context.ui.addItem({
       type: MessageType.INFO,
       text: `Provider switched to ${id}.`,
     });
+    return undefined;
   },
 };
 

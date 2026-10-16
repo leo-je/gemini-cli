@@ -5,9 +5,13 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import { providerCommand } from './providerCommand.js';
 import { CommandKind, type CommandContext } from './types.js';
 import { MessageType } from '../types.js';
+import { getOpenAiProvidersPath } from '@google/gemini-cli-core';
 
 function makeContext(options: {
   isOpenAi: boolean;
@@ -26,7 +30,9 @@ function makeContext(options: {
   const config = {
     getContentGeneratorConfig: () => ({
       authType: options.isOpenAi ? 'openai' : 'gemini',
+      baseUrl: 'https://endpoint.test/v1',
     }),
+    getActiveOpenAiProviderId: () => undefined,
     switchOpenAiProvider,
   };
   const setValue = vi.fn(options.setValue ?? (() => {}));
@@ -41,14 +47,29 @@ function makeContext(options: {
 }
 
 describe('providerCommand', () => {
+  let fakeHome: string;
+
+  /** Writes the provider file the real loader reads, under a temp home. */
+  function writeProviders(providers: unknown[]): void {
+    const file = getOpenAiProvidersPath();
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, JSON.stringify({ providers }, null, 2), {
+      encoding: 'utf8',
+      mode: 0o600,
+    });
+  }
+
   beforeEach(() => {
     // The OpenAI-mode check also consults GEMINI_API_TYPE, so clear it and let
     // each case's fake config decide.
     vi.stubEnv('GEMINI_API_TYPE', '');
+    fakeHome = fs.mkdtempSync(path.join(os.tmpdir(), 'provider-cmd-home-'));
+    vi.stubEnv('HOME', fakeHome);
   });
 
   afterEach(() => {
     vi.unstubAllEnvs();
+    fs.rmSync(fakeHome, { recursive: true, force: true });
   });
 
   it('is registered as a built-in with list, use and add subcommands', () => {
@@ -140,6 +161,51 @@ describe('providerCommand', () => {
       'User',
       'security.auth.openAiProviderId',
       'openrouter',
+    );
+  });
+
+  it('switch: opens the model list when the provider has no default model', async () => {
+    // Without this the session could not send a message: an unset modelId is
+    // supported, but nothing asked which model to use.
+    writeProviders([{ id: 'openrouter', baseUrl: 'https://openrouter.ai/v1' }]);
+    const { context, setValue } = makeContext({ isOpenAi: true });
+
+    const use = providerCommand.subCommands!.find((c) => c.name === 'use')!;
+    const result = await use.action!(context, 'openrouter');
+
+    expect(setValue).toHaveBeenCalledWith(
+      'User',
+      'security.auth.openAiProviderId',
+      'openrouter',
+    );
+    expect(result).toEqual({
+      type: 'dialog',
+      dialog: 'model',
+      props: { openAiEndpoint: 'https://endpoint.test/v1' },
+    });
+  });
+
+  it('switch: stays quiet about models when the provider has a default', async () => {
+    writeProviders([
+      {
+        id: 'openrouter',
+        baseUrl: 'https://openrouter.ai/v1',
+        modelId: 'gpt-4o',
+      },
+    ]);
+    const { context, addItem } = makeContext({ isOpenAi: true });
+
+    const use = providerCommand.subCommands!.find((c) => c.name === 'use')!;
+    const result = await use.action!(context, 'openrouter');
+
+    expect(result).toBeUndefined();
+    expect(addItem).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: MessageType.INFO,
+        text: expect.stringContaining(
+          'Provider switched to openrouter',
+        ) as string,
+      }),
     );
   });
 });

@@ -18,6 +18,7 @@ import type { Config } from '@google/gemini-cli-core';
 import { addOpenAiProvider } from './addProvider.js';
 import {
   persistProviderId,
+  providerHasDefaultModel,
   type ProviderPreferenceWriter,
 } from './openAiProviderPreference.js';
 import type { NewProviderValues } from './AddProviderDialog.js';
@@ -37,6 +38,12 @@ export function useProviderDialogHandlers(options: {
   historyManager: HistoryReporter;
   /** Where the chosen provider is recorded, so it survives a restart. */
   settings: ProviderPreferenceWriter;
+  /**
+   * Opens the endpoint's model list. Used right after a switch to a provider
+   * that declares no default model, because such a session cannot send a
+   * message until one is chosen.
+   */
+  openModelDialog: (openAiEndpoint?: string) => void;
   closeProviderDialog: () => void;
   closeAddProviderDialog: () => void;
 }): ProviderDialogHandlers {
@@ -44,9 +51,38 @@ export function useProviderDialogHandlers(options: {
     config,
     historyManager,
     settings,
+    openModelDialog,
     closeProviderDialog,
     closeAddProviderDialog,
   } = options;
+
+  /**
+   * Reports a completed switch, and asks for a model when the provider has no
+   * default one.
+   *
+   * A provider may leave `modelId` unset, which is supported by design — the
+   * session is meant to pick from the endpoint's catalog. Nothing did the
+   * picking, though, so the next message failed. Opening the list here closes
+   * that gap; the endpoint is passed so the dialog lists this provider's models
+   * rather than the compiled-in Gemini ones.
+   */
+  const reportSwitch = useCallback(
+    (providerId: string, suffix = '') => {
+      if (providerHasDefaultModel(providerId)) {
+        historyManager.addItem({
+          type: MessageType.INFO,
+          text: `Switched to provider ${providerId}.${suffix} Run /model list to pick a model, or /provider to switch again.`,
+        });
+        return;
+      }
+      historyManager.addItem({
+        type: MessageType.INFO,
+        text: `Switched to provider ${providerId}.${suffix} It has no default model, so pick one from the list below.`,
+      });
+      openModelDialog(config.getContentGeneratorConfig()?.baseUrl);
+    },
+    [config, historyManager, openModelDialog],
+  );
 
   const handleProviderSelect = useCallback(
     async (providerId: string) => {
@@ -56,10 +92,7 @@ export function useProviderDialogHandlers(options: {
         // Persisted only after the switch succeeded, so a rejected provider is
         // never the one the next session starts on.
         persistProviderId(settings, providerId);
-        historyManager.addItem({
-          type: MessageType.INFO,
-          text: `Switched to provider ${providerId}. Run /model list to pick a model, or /provider to switch again.`,
-        });
+        reportSwitch(providerId);
       } catch (e) {
         historyManager.addItem({
           type: MessageType.ERROR,
@@ -69,7 +102,7 @@ export function useProviderDialogHandlers(options: {
         });
       }
     },
-    [config, settings, closeProviderDialog, historyManager],
+    [config, settings, closeProviderDialog, historyManager, reportSwitch],
   );
 
   const handleAddProviderSubmit = useCallback(
@@ -84,10 +117,9 @@ export function useProviderDialogHandlers(options: {
         const keyNote = saved.apiKeyEnv
           ? ` Its API key was stored in ${saved.envPath} as ${saved.apiKeyEnv}.`
           : '';
-        historyManager.addItem({
-          type: MessageType.INFO,
-          text: `Added provider ${values.id} and switched to it.${keyNote} Run /model list to pick a model.`,
-        });
+        // The add form lets the default model be left blank, so the same
+        // follow-up applies as for an existing provider.
+        reportSwitch(values.id, keyNote);
       } catch (e) {
         historyManager.addItem({
           type: MessageType.ERROR,
@@ -97,7 +129,7 @@ export function useProviderDialogHandlers(options: {
         });
       }
     },
-    [config, settings, closeAddProviderDialog, historyManager],
+    [config, settings, closeAddProviderDialog, historyManager, reportSwitch],
   );
 
   return { handleProviderSelect, handleAddProviderSubmit };
