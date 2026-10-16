@@ -267,3 +267,56 @@ describe('a persisted choice whose provider is gone', () => {
     ).toThrow(/Unknown provider "nope"/);
   });
 });
+
+describe('an unusable provider file is reported, not just ignored', () => {
+  it('warns about a key in a file other users can read', () => {
+    // The loader rejects a literal key in a group/world-readable file. The gate
+    // has to swallow the error to keep startup working, so without this the user
+    // only saw the endpoint dialog — which describes nothing that is wrong.
+    writeProviders({
+      providers: [
+        { id: 'a', baseUrl: 'https://x/v1', modelId: 'm1', apiKey: 'literal' },
+      ],
+    });
+    fs.chmodSync(providersPath, 0o644);
+    const warn = vi
+      .spyOn(coreEvents, 'emitFeedback')
+      .mockImplementation(() => {});
+
+    expect(hasResolvableOpenAiProvider({}, providersPath)).toBe(false);
+    expect(warn).toHaveBeenCalledWith(
+      'warning',
+      expect.stringContaining('chmod 600'),
+    );
+    warn.mockRestore();
+  });
+
+  it('warns about a malformed file', () => {
+    // Bypasses writeProviders so the JSON is deliberately invalid.
+    fs.writeFileSync(providersPath, '{ not json', {
+      encoding: 'utf8',
+      mode: 0o600,
+    });
+    const warn = vi
+      .spyOn(coreEvents, 'emitFeedback')
+      .mockImplementation(() => {});
+
+    expect(hasResolvableOpenAiProvider({}, providersPath)).toBe(false);
+    expect(warn).toHaveBeenCalledWith(
+      'warning',
+      expect.stringContaining('Ignoring the OpenAI provider file'),
+    );
+    warn.mockRestore();
+  });
+
+  it('stays silent for an absent file', () => {
+    // The normal single-endpoint state; a warning on every start would be noise.
+    const warn = vi
+      .spyOn(coreEvents, 'emitFeedback')
+      .mockImplementation(() => {});
+
+    expect(hasResolvableOpenAiProvider({}, providersPath)).toBe(false);
+    expect(warn).not.toHaveBeenCalled();
+    warn.mockRestore();
+  });
+});

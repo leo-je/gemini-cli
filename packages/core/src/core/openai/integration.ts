@@ -25,8 +25,11 @@
 import type { Config } from '../../config/config.js';
 import { AuthType, type ContentGeneratorConfig } from '../contentGenerator.js';
 import { coreEvents } from '../../utils/events.js';
+import { getErrorMessage } from '../../utils/errors.js';
+import * as fs from 'node:fs';
 import {
   OPENAI_PROVIDER_ENV,
+  getOpenAiProvidersPath,
   persistProviderModelId,
   resolveProvider,
   resolveProviderFromEnv,
@@ -219,7 +222,9 @@ function resolveImplicitProvider(
  *
  * Deliberately swallow errors: a malformed provider file, or one whose
  * permissions the loader rejects, must degrade to "not configured" (the
- * dialog) rather than become a new startup failure.
+ * dialog) rather than become a new startup failure. The reason is reported
+ * though — see `reportUnreadableProviderFile` — because the user otherwise
+ * only sees the endpoint dialog, which describes nothing that is wrong.
  */
 export function hasResolvableOpenAiProvider(
   env?: Record<string, string | undefined>,
@@ -239,9 +244,40 @@ export function hasResolvableOpenAiProvider(
     const requestedId = cleanEnv?.[OPENAI_PROVIDER_ENV];
     const profile = resolveProvider(requestedId, filePath, cleanEnv);
     return Boolean(profile?.baseUrl && profile?.modelId);
-  } catch {
+  } catch (error) {
+    reportUnreadableProviderFile(error, filePath);
     return false;
   }
+}
+
+/**
+ * Says why a provider file that exists could not be used.
+ *
+ * The reasons the loader raises are all actionable — a file readable by other
+ * users while it holds a literal key, invalid JSON, an entry that fails
+ * validation — but the caller has to swallow them to keep a broken file from
+ * blocking startup. Swallowing the message too made the failure unguessable:
+ * the user was sent back to the endpoint dialog with nothing to act on.
+ *
+ * Only reported when the file is actually there. An absent file is the normal
+ * single-endpoint state, not a failure worth a warning on every start.
+ */
+function reportUnreadableProviderFile(
+  error: unknown,
+  filePath: string | undefined,
+): void {
+  const path = filePath ?? getOpenAiProvidersPath();
+  try {
+    if (!fs.existsSync(path)) {
+      return;
+    }
+  } catch {
+    // A path that cannot even be inspected is reported below anyway.
+  }
+  coreEvents.emitFeedback(
+    'warning',
+    `Ignoring the OpenAI provider file at ${path}: ${getErrorMessage(error)}`,
+  );
 }
 
 /**
