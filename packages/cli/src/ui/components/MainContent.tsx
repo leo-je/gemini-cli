@@ -20,9 +20,15 @@ import {
 import { ScrollableList } from './shared/ScrollableList.js';
 import { useMemo, memo, useCallback, useEffect, useRef } from 'react';
 import { MAX_GEMINI_MESSAGE_LINES } from '../constants.js';
+import { getInlineThinkingMode } from '../utils/inlineThinkingMode.js';
+import { useSettings } from '../contexts/SettingsContext.js';
 import { useConfirmingTool } from '../hooks/useConfirmingTool.js';
 import { ToolConfirmationQueue } from './ToolConfirmationQueue.js';
 import { appEvents, AppEvent } from '../../utils/events.js';
+// Fork-owned module: drops history items that cannot render anything before
+// they reach the component tree. Kept out of this upstream file to limit the
+// merge-conflict surface; see the module header for details.
+import { getVisibleHistoryEntries } from '../fix/historyItemVisibility.js';
 
 const MemoizedHistoryItemDisplay = memo(HistoryItemDisplay);
 const MemoizedAppHeader = memo(AppHeader);
@@ -60,6 +66,7 @@ const ToolConfirmationQueueWithBudget = ({
 export const MainContent = () => {
   const { version } = useAppContext();
   const uiState = useUIState();
+  const settings = useSettings();
   const isAlternateBufferOrTerminalBuffer = useAlternateBuffer();
   const config = useConfig();
   const useTerminalBuffer = config.getUseTerminalBuffer();
@@ -116,10 +123,27 @@ export const MainContent = () => {
     return -1;
   }, [uiState.history]);
 
+  // Fork change: skip history items that cannot render anything, so that
+  // resuming a long session does not mount one Ink node per dropped item.
+  // The helper returns each surviving item with its original index, so the
+  // `isExpandable` comparison below still works against the full history.
+  // Logic lives in `ui/fix/historyItemVisibility.ts` to limit the conflict
+  // surface of this upstream file. The boundary flags below are computed from
+  // this filtered list, so a dropped neighbour can never leave a stranded
+  // `isFirstThinking` / `isFirstAfterThinking` margin on the items that remain.
+  const visibleHistory = useMemo(
+    () =>
+      getVisibleHistoryEntries(
+        uiState.history,
+        getInlineThinkingMode(settings),
+      ),
+    [uiState.history, settings],
+  );
+
   const augmentedHistory = useMemo(
     () =>
-      uiState.history.map((item, i) => {
-        const prevType = i > 0 ? uiState.history[i - 1]?.type : undefined;
+      visibleHistory.map(({ item, index }, i) => {
+        const prevType = i > 0 ? visibleHistory[i - 1]?.item.type : undefined;
         const isFirstThinking =
           item.type === 'thinking' && prevType !== 'thinking';
         const isFirstAfterThinking =
@@ -130,13 +154,13 @@ export const MainContent = () => {
 
         return {
           item,
-          isExpandable: i > lastUserPromptIndex,
+          isExpandable: index > lastUserPromptIndex,
           isFirstThinking,
           isFirstAfterThinking,
           isToolGroupBoundary,
         };
       }),
-    [uiState.history, lastUserPromptIndex],
+    [visibleHistory, lastUserPromptIndex],
   );
 
   const historyItems = useMemo(

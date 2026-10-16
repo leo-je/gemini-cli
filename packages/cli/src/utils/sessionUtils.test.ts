@@ -1315,4 +1315,129 @@ describe('convertSessionToHistoryFormats', () => {
       throw new Error('Expected tool_group history item');
     }
   });
+
+  it('should collapse a message thoughts into one thinking item', () => {
+    const messages: MessageRecord[] = [
+      {
+        id: '1',
+        timestamp: new Date().toISOString(),
+        type: 'gemini',
+        content: 'Answer',
+        thoughts: [
+          {
+            subject: '',
+            description: 'First',
+            timestamp: new Date().toISOString(),
+          },
+          {
+            subject: '',
+            description: 'Second',
+            timestamp: new Date().toISOString(),
+          },
+          {
+            subject: '',
+            description: 'Third',
+            timestamp: new Date().toISOString(),
+          },
+        ],
+      },
+    ];
+
+    const result = convertSessionToHistoryFormats(messages);
+
+    expect(result.uiHistory).toHaveLength(2);
+    expect(result.uiHistory[0]).toEqual({
+      type: 'thinking',
+      thought: { subject: '', description: 'FirstSecondThird' },
+    });
+    expect(result.uiHistory[1]).toEqual({ type: 'gemini', text: 'Answer' });
+  });
+
+  it('should concatenate thought fragments without inserting separators', () => {
+    // `thoughts` accumulates one entry per streamed chunk, so fragments split
+    // at token boundaries and must be joined verbatim to recover the text.
+    const messages: MessageRecord[] = [
+      {
+        id: '1',
+        timestamp: new Date().toISOString(),
+        type: 'gemini',
+        content: '',
+        thoughts: [
+          {
+            subject: '',
+            description: 'src',
+            timestamp: new Date().toISOString(),
+          },
+          {
+            subject: '',
+            description: '/view/F',
+            timestamp: new Date().toISOString(),
+          },
+          {
+            subject: '',
+            description: 'tp.vue',
+            timestamp: new Date().toISOString(),
+          },
+        ],
+      },
+    ];
+
+    const result = convertSessionToHistoryFormats(messages);
+
+    expect(result.uiHistory).toHaveLength(1);
+    expect(result.uiHistory[0]).toEqual({
+      type: 'thinking',
+      thought: { subject: '', description: 'src/view/Ftp.vue' },
+    });
+  });
+
+  it('should skip thinking items when every thought carries no text', () => {
+    const messages: MessageRecord[] = [
+      {
+        id: '1',
+        timestamp: new Date().toISOString(),
+        type: 'gemini',
+        content: 'Answer',
+        thoughts: [
+          { subject: '', description: '', timestamp: new Date().toISOString() },
+          {
+            subject: '   ',
+            description: '\n',
+            timestamp: new Date().toISOString(),
+          },
+        ],
+      },
+    ];
+
+    const result = convertSessionToHistoryFormats(messages);
+
+    expect(result.uiHistory).toHaveLength(1);
+    expect(result.uiHistory[0]).toEqual({ type: 'gemini', text: 'Answer' });
+  });
+
+  it('should keep the item count proportional to a long session messages', () => {
+    // Regression guard: emitting one item per thinking fragment made resuming a
+    // long session mount thousands of nodes in a single render, which was the
+    // crash this collapse fixes. A 100-message session with 500 fragments each
+    // is 50k fragments, and must still convert to ~100 items.
+    const messages: MessageRecord[] = Array.from({ length: 100 }, (_, i) => ({
+      id: `${i}`,
+      timestamp: new Date().toISOString(),
+      type: 'gemini' as const,
+      content: `answer ${i}`,
+      thoughts: Array.from({ length: 500 }, (_, t) => ({
+        subject: '',
+        description: `fragment-${t}`,
+        timestamp: new Date().toISOString(),
+      })),
+    }));
+
+    const result = convertSessionToHistoryFormats(messages);
+
+    // One thinking item plus one gemini item per message, not 50k items.
+    expect(result.uiHistory).toHaveLength(200);
+    expect(
+      result.uiHistory.filter((item) => item.type === 'thinking'),
+    ).toHaveLength(100);
+  });
 });

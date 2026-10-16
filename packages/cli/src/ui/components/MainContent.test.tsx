@@ -834,6 +834,72 @@ describe('MainContent', () => {
     renderResult.unmount();
   });
 
+  it('does not mount thinking items when inline thinking is off', async () => {
+    // Inline thinking is off by default, so a resumed long session would
+    // otherwise mount one empty Ink node per recorded thought fragment.
+    mockUseSettings.mockReturnValue({
+      merged: { ui: { inlineThinkingMode: 'off' } },
+    });
+
+    const renderResult = await renderWithProviders(<MainContent />, {
+      uiState: {
+        ...defaultMockUiState,
+        history: [
+          { id: 1, type: 'user' as const, text: 'Plan a solution' },
+          {
+            id: 2,
+            type: 'thinking' as const,
+            thought: {
+              subject: 'Hidden analysis',
+              description: 'This thought must not reach the tree.',
+            },
+          },
+          { id: 3, type: 'gemini' as const, text: 'Visible answer' },
+        ],
+      } as Partial<UIState>,
+    });
+
+    const output = renderResult.lastFrame();
+    expect(output).toContain('Visible answer');
+    expect(output).not.toContain('Hidden analysis');
+    expect(output).not.toContain('This thought must not reach the tree.');
+    renderResult.unmount();
+  });
+
+  it('skips thinking items whose thought carries no text even when inline thinking is on', async () => {
+    mockUseSettings.mockReturnValue({
+      merged: { ui: { inlineThinkingMode: 'full' } },
+    });
+
+    const renderResult = await renderWithProviders(<MainContent />, {
+      uiState: {
+        ...defaultMockUiState,
+        history: [
+          { id: 1, type: 'user' as const, text: 'Plan a solution' },
+          {
+            id: 2,
+            type: 'thinking' as const,
+            thought: { subject: '', description: '' },
+          },
+          {
+            id: 3,
+            type: 'thinking' as const,
+            thought: {
+              subject: 'Kept subject',
+              description: 'Kept description',
+            },
+          },
+          { id: 4, type: 'gemini' as const, text: 'Visible answer' },
+        ],
+      } as Partial<UIState>,
+    });
+
+    const output = renderResult.lastFrame();
+    expect(output).toContain('Visible answer');
+    expect(output).toContain('Kept subject');
+    renderResult.unmount();
+  });
+
   describe('MainContent Tool Output Height Logic', () => {
     const testCases = [
       {

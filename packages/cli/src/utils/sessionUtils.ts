@@ -18,6 +18,9 @@ import * as fs from 'node:fs/promises';
 import path from 'node:path';
 import { stripUnsafeCharacters } from '../ui/utils/textUtils.js';
 import { MessageType, type HistoryItemWithoutId } from '../ui/types.js';
+// Fork-owned module: see the file header for why the logic lives outside this
+// upstream file (merge-conflict surface).
+import { toThinkingHistoryItem } from '../ui/fix/thinkingFragments.js';
 
 /**
  * Constant for the resume "latest" identifier.
@@ -678,16 +681,17 @@ export function convertSessionToHistoryFormats(
   const uiHistory: HistoryItemWithoutId[] = [];
 
   for (const msg of messages) {
-    // Add thoughts if present
+    // Add thoughts if present.
+    //
+    // Fork change (kept to a single call to limit the merge-conflict surface):
+    // the previous inline loop emitted one UI item per recorded thinking
+    // fragment; the fork-owned helper collapses a message's fragments into one
+    // item. See `ui/fix/thinkingFragments.ts` for the rationale — adapt that
+    // file rather than re-inlining a loop here.
     if (msg.type === 'gemini' && msg.thoughts && msg.thoughts.length > 0) {
-      for (const thought of msg.thoughts) {
-        uiHistory.push({
-          type: 'thinking',
-          thought: {
-            subject: thought.subject,
-            description: thought.description,
-          },
-        });
+      const thinkingItem = toThinkingHistoryItem(msg.thoughts);
+      if (thinkingItem) {
+        uiHistory.push(thinkingItem);
       }
     }
 
