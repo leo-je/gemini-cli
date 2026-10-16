@@ -12,6 +12,7 @@ import {
 import { MessageType } from '../types.js';
 import { isOpenAiBackend } from '../openai/index.js';
 import { providerDialogAction } from '../openai/providerDialogRouting.js';
+import { persistProviderId } from '../openai/openAiProviderPreference.js';
 
 const listProvidersCommand: SlashCommand = {
   name: 'list',
@@ -64,6 +65,10 @@ const useProviderCommand: SlashCommand = {
     // Switching rebuilds the content generator; opening the picker instead is
     // the discoverable path, so this is the scriptable one.
     await config.switchOpenAiProvider(id);
+    // Fork-owned: record the choice so the next start uses it too. Without this
+    // the selection only lived in memory and every restart fell back to the
+    // provider file's first entry.
+    persistProviderId(context.services.settings, id);
     context.ui.addItem({
       type: MessageType.INFO,
       text: `Provider switched to ${id}.`,

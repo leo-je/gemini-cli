@@ -1984,6 +1984,20 @@ const SETTINGS_SCHEMA = {
               'The currently selected authentication type. Valid values are `oauth-personal`, `gemini-api-key`, `vertex-ai`, `cloud-shell` (legacy), `compute-default-credentials`, `gateway`, and `openai`.',
             showInDialog: false,
           },
+          // Fork-owned key: mirrors the OpenAI-compatible provider chosen with
+          // `/provider`, so the choice survives a restart. Without it the choice
+          // lived only in memory and every start fell back to the provider
+          // file's first entry. See `ui/openai/openAiProviderPreference.ts`.
+          openAiProviderId: {
+            type: 'string',
+            label: 'Selected OpenAI Provider',
+            category: 'Security',
+            requiresRestart: false,
+            default: undefined as string | undefined,
+            description:
+              "The OpenAI-compatible provider this session should use, as configured by `/provider`. Values are the provider ids from `~/.gemini/openai-providers.json`; an id that no longer exists falls back to the file's first entry.",
+            showInDialog: false,
+          },
           enforcedType: {
             type: 'string',
             label: 'Enforced Auth Type',

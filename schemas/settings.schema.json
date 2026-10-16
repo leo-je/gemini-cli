@@ -112,8 +112,8 @@
         "enableAutoUpdateNotification": {
           "title": "Enable Auto Update Notification",
           "description": "Enable update notification prompts.",
-          "markdownDescription": "Enable update notification prompts.\n\n- Category: `General`\n- Requires restart: `no`\n- Default: `true`",
-          "default": true,
+          "markdownDescription": "Enable update notification prompts.\n\n- Category: `General`\n- Requires restart: `no`\n- Default: `false`",
+          "default": false,
           "type": "boolean"
         },
         "enableNotifications": {
@@ -631,8 +631,8 @@
         "usageStatisticsEnabled": {
           "title": "Enable Usage Statistics",
           "description": "Enable collection of usage statistics",
-          "markdownDescription": "Enable collection of usage statistics\n\n- Category: `Privacy`\n- Requires restart: `yes`\n- Default: `true`",
-          "default": true,
+          "markdownDescription": "Enable collection of usage statistics\n\n- Category: `Privacy`\n- Requires restart: `yes`\n- Default: `false`",
+          "default": false,
           "type": "boolean"
         }
       },
@@ -3310,6 +3310,12 @@
               "title": "Selected Auth Type",
               "description": "The currently selected authentication type. Valid values are `oauth-personal`, `gemini-api-key`, `vertex-ai`, `cloud-shell` (legacy), `compute-default-credentials`, `gateway`, and `openai`.",
               "markdownDescription": "The currently selected authentication type. Valid values are `oauth-personal`, `gemini-api-key`, `vertex-ai`, `cloud-shell` (legacy), `compute-default-credentials`, `gateway`, and `openai`.\n\n- Category: `Security`\n- Requires restart: `yes`",
+              "type": "string"
+            },
+            "openAiProviderId": {
+              "title": "Selected OpenAI Provider",
+              "description": "The OpenAI-compatible provider this session should use, as configured by `/provider`. Values are the provider ids from `~/.gemini/openai-providers.json`; an id that no longer exists falls back to the file's first entry.",
+              "markdownDescription": "The OpenAI-compatible provider this session should use, as configured by `/provider`. Values are the provider ids from `~/.gemini/openai-providers.json`; an id that no longer exists falls back to the file's first entry.\n\n- Category: `Security`\n- Requires restart: `no`",
               "type": "string"
             },
             "enforcedType": {

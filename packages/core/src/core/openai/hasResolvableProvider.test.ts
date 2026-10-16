@@ -10,9 +10,11 @@ import * as path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Config } from '../../config/config.js';
 import { AuthType, type ContentGeneratorConfig } from '../contentGenerator.js';
+import { coreEvents } from '../../utils/events.js';
 import {
   applyProviderToContentGeneratorConfig,
   hasResolvableOpenAiProvider,
+  resolveActiveProvider,
 } from './integration.js';
 
 /** Matches `Storage.getGlobalGeminiDir()`: `<home>/.gemini`. */
@@ -202,5 +204,66 @@ describe('auth gate and session builder agree on the endpoint', () => {
 
     expect(contentGeneratorConfig.baseUrl).toBe('https://env/v1');
     expect(contentGeneratorConfig.providerId).toBeUndefined();
+  });
+});
+
+describe('a persisted choice whose provider is gone', () => {
+  let fakeHome: string;
+
+  function writeDefaultProviders(providers: unknown[]): void {
+    const geminiDir = path.join(fakeHome, GEMINI_DIR_NAME);
+    fs.mkdirSync(geminiDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(geminiDir, 'openai-providers.json'),
+      JSON.stringify({ providers }, null, 2),
+      { encoding: 'utf8', mode: 0o600 },
+    );
+  }
+
+  beforeEach(() => {
+    fakeHome = fs.mkdtempSync(path.join(os.tmpdir(), 'openai-stale-home-'));
+    vi.stubEnv('HOME', fakeHome);
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    fs.rmSync(fakeHome, { recursive: true, force: true });
+  });
+
+  it('degrades to the first entry and warns instead of throwing', () => {
+    // The CLI persists the choice to settings.json while the provider file is
+    // edited by hand, so a stored id can outlive its provider. Startup has to
+    // survive that, on the file's first entry.
+    writeDefaultProviders([
+      { id: 'alpha', baseUrl: 'https://alpha/v1', modelId: 'alpha-1' },
+      { id: 'beta', baseUrl: 'https://beta/v1', modelId: 'beta-1' },
+    ]);
+    const warn = vi
+      .spyOn(coreEvents, 'emitFeedback')
+      .mockImplementation(() => {});
+
+    const resolved = resolveActiveProvider({
+      sessionProviderId: 'deleted-provider',
+      env: {},
+      allowImplicitProvider: true,
+    });
+
+    expect(resolved?.id).toBe('alpha');
+    expect(warn).toHaveBeenCalledWith(
+      'warning',
+      expect.stringContaining('deleted-provider'),
+    );
+    warn.mockRestore();
+  });
+
+  it('still fails loudly when the caller named the provider', () => {
+    // `/provider use nope` is a live instruction, not a stale preference.
+    writeDefaultProviders([
+      { id: 'alpha', baseUrl: 'https://alpha/v1', modelId: 'alpha-1' },
+    ]);
+
+    expect(() =>
+      resolveActiveProvider({ requestedId: 'nope', env: {} }),
+    ).toThrow(/Unknown provider "nope"/);
   });
 });

@@ -1178,6 +1178,9 @@ Logging in with Google... Restarting Gemini CLI to continue.
     useProviderDialogHandlers({
       config,
       historyManager,
+      // Fork-owned: the hook writes the chosen provider back so it survives a
+      // restart (see `openai/openAiProviderPreference.ts`).
+      settings,
       closeProviderDialog,
       closeAddProviderDialog,
     });

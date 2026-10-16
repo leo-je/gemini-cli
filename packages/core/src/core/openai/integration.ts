@@ -24,6 +24,7 @@
 
 import type { Config } from '../../config/config.js';
 import { AuthType, type ContentGeneratorConfig } from '../contentGenerator.js';
+import { coreEvents } from '../../utils/events.js';
 import {
   OPENAI_PROVIDER_ENV,
   persistProviderModelId,
@@ -150,14 +151,52 @@ export function resolveActiveProvider(options: {
     return undefined;
   }
   if (choice) {
-    return resolveProvider(choice, undefined, env);
+    try {
+      return resolveProvider(choice, undefined, env);
+    } catch (error) {
+      // A choice that came from the caller (`/provider`, or a provider named on
+      // the command line) is a live instruction, so a bad id is a real error and
+      // must stay one.
+      if (requestedId !== undefined) {
+        throw error;
+      }
+      // A session-scoped choice can outlive its provider, because the CLI
+      // persists the selection to `settings.json` while the provider file is
+      // edited by hand. Degrade to the implicit resolution instead of making
+      // the CLI unstartable; `resolveImplicitProvider` reports why.
+      return resolveImplicitProvider(sessionProviderId, env);
+    }
   }
   if (envChoice) {
     return resolveProviderFromEnv(env);
   }
-  // Committed to OpenAI-compatible mode with no explicit choice: the file's
-  // first entry is the session's endpoint, exactly as the auth gate decided.
-  return resolveProvider(undefined, undefined, env);
+  return resolveImplicitProvider(undefined, env);
+}
+
+/**
+ * Resolves the endpoint when nothing usable named a provider.
+ *
+ * Reading the provider file is allowed here because the caller already
+ * committed to OpenAI-compatible mode (`allowImplicitProvider`), and the answer
+ * has to match what the auth gate decided — see `resolveActiveProvider`.
+ *
+ * `staleId` is a selection that could not be resolved, such as a persisted
+ * `security.auth.openAiProviderId` whose provider was removed or renamed. It is
+ * reported to the user and then ignored, so a hand-edited provider file cannot
+ * leave the CLI unable to start.
+ */
+function resolveImplicitProvider(
+  staleId: string | undefined,
+  env: Record<string, string> | undefined,
+): OpenAiProviderProfile | undefined {
+  const fallback = resolveProvider(undefined, undefined, env);
+  if (staleId && fallback) {
+    coreEvents.emitFeedback(
+      'warning',
+      `The selected OpenAI provider "${staleId}" is no longer configured, so this session is using "${fallback.id}" instead. Run /provider to choose another.`,
+    );
+  }
+  return fallback;
 }
 
 /**

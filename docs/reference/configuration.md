@@ -148,7 +148,7 @@ their corresponding top-level category object in your `settings.json` file.
 - **`general.enableAutoUpdateNotification`** (boolean):
 
   - **Description:** Enable update notification prompts.
-  - **Default:** `true`
+  - **Default:** `false`
 
 - **`general.enableNotifications`** (boolean):
 
@@ -501,7 +501,7 @@ their corresponding top-level category object in your `settings.json` file.
 
 - **`privacy.usageStatisticsEnabled`** (boolean):
   - **Description:** Enable collection of usage statistics
-  - **Default:** `true`
+  - **Default:** `false`
   - **Requires restart:** Yes
 
 #### `billing`
@@ -2007,6 +2007,14 @@ their corresponding top-level category object in your `settings.json` file.
     `compute-default-credentials`, `gateway`, and `openai`.
   - **Default:** `undefined`
   - **Requires restart:** Yes
+
+- **`security.auth.openAiProviderId`** (string):
+
+  - **Description:** The OpenAI-compatible provider this session should use, as
+    configured by `/provider`. Values are the provider ids from
+    `~/.gemini/openai-providers.json`; an id that no longer exists falls back to
+    the file's first entry.
+  - **Default:** `undefined`
 
 - **`security.auth.enforcedType`** (string):
 

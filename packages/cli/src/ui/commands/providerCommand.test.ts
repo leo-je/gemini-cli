@@ -12,10 +12,12 @@ import { MessageType } from '../types.js';
 function makeContext(options: {
   isOpenAi: boolean;
   switchOpenAiProvider?: (id: string) => Promise<void>;
+  setValue?: (scope: unknown, key: string, value: unknown) => void;
 }): {
   context: CommandContext;
   addItem: ReturnType<typeof vi.fn>;
   switchOpenAiProvider: ReturnType<typeof vi.fn>;
+  setValue: ReturnType<typeof vi.fn>;
 } {
   const addItem = vi.fn();
   const switchOpenAiProvider = vi.fn(
@@ -27,11 +29,15 @@ function makeContext(options: {
     }),
     switchOpenAiProvider,
   };
+  const setValue = vi.fn(options.setValue ?? (() => {}));
   const context = {
     ui: { addItem },
-    services: { agentContext: { config } },
+    services: {
+      agentContext: { config },
+      settings: { setValue },
+    },
   } as unknown as CommandContext;
-  return { context, addItem, switchOpenAiProvider };
+  return { context, addItem, switchOpenAiProvider, setValue };
 }
 
 describe('providerCommand', () => {
@@ -119,6 +125,21 @@ describe('providerCommand', () => {
         type: MessageType.INFO,
         text: expect.stringContaining('openrouter') as string,
       }),
+    );
+  });
+
+  it('switch: records the choice so the next start uses it', async () => {
+    // Regression guard: the selection used to live only in memory, so quitting
+    // and starting again silently fell back to the provider file's first entry.
+    const { context, setValue } = makeContext({ isOpenAi: true });
+
+    const use = providerCommand.subCommands!.find((c) => c.name === 'use')!;
+    await use.action!(context, 'openrouter');
+
+    expect(setValue).toHaveBeenCalledWith(
+      'User',
+      'security.auth.openAiProviderId',
+      'openrouter',
     );
   });
 });

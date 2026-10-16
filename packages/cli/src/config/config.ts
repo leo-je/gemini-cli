@@ -971,6 +971,12 @@ export async function loadCliConfig(
     embeddingModel: DEFAULT_GEMINI_EMBEDDING_MODEL,
     sandbox: sandboxConfig,
     toolSandboxing: settings.security?.toolSandboxing ?? false,
+    // Fork-owned: seed the session with the provider the user last chose, so a
+    // restart does not fall back to the provider file's first entry. The value
+    // is written back by `ui/openai/openAiProviderPreference.ts` whenever
+    // `/provider` switches. An id that no longer exists degrades to the first
+    // entry with a warning (see core/openai/integration.ts).
+    openAiProviderId: settings.security?.auth?.openAiProviderId,
     targetDir: cwd,
     includeDirectoryTree,
     includeDirectories,

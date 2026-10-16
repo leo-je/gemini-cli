@@ -145,4 +145,42 @@ describe('Config.switchOpenAiProvider', () => {
     ) as { providers: Array<{ modelId: string }> };
     expect(written.providers[0].modelId).toBe('gpt-4o');
   });
+
+  it('seeds the session from the persisted provider id', () => {
+    // What the CLI does on startup: it passes
+    // `security.auth.openAiProviderId` through `ConfigParameters`. Without this
+    // the choice made with `/provider` did not survive a restart and the
+    // session silently fell back to the provider file's first entry.
+    const config = makeConfig({ openAiProviderId: 'beta' });
+
+    expect(config.getActiveOpenAiProviderId()).toBe('beta');
+  });
+
+  it('treats a blank persisted id as no choice', () => {
+    expect(
+      makeConfig({ openAiProviderId: '' }).getActiveOpenAiProviderId(),
+    ).toBeUndefined();
+    expect(
+      makeConfig({ openAiProviderId: '  ' }).getActiveOpenAiProviderId(),
+    ).toBeUndefined();
+  });
+
+  it('falls back to the first provider when the persisted id is gone', async () => {
+    // A persisted choice can outlive its provider: the CLI writes the selection
+    // to settings.json while the provider file is edited by hand. Startup must
+    // still work, on the file's first entry, and say why.
+    writeProviders([
+      { id: 'alpha', baseUrl: 'https://alpha/v1', modelId: 'alpha-1' },
+      { id: 'beta', baseUrl: 'https://beta/v1', modelId: 'beta-1' },
+    ]);
+    const config = makeConfig({ openAiProviderId: 'deleted-provider' });
+
+    await config.refreshAuth(AuthType.USE_OPENAI);
+
+    // Startup survived, on the first entry rather than the missing one.
+    expect(config.getContentGeneratorConfig()?.baseUrl).toBe(
+      'https://alpha/v1',
+    );
+    expect(config.getContentGeneratorConfig()?.providerId).toBe('alpha');
+  });
 });

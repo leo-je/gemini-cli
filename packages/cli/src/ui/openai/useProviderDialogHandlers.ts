@@ -16,6 +16,10 @@ import { useCallback } from 'react';
 import { MessageType } from '../types.js';
 import type { Config } from '@google/gemini-cli-core';
 import { addOpenAiProvider } from './addProvider.js';
+import {
+  persistProviderId,
+  type ProviderPreferenceWriter,
+} from './openAiProviderPreference.js';
 import type { NewProviderValues } from './AddProviderDialog.js';
 
 /** The slice of the history manager these handlers report through. */
@@ -31,12 +35,15 @@ export interface ProviderDialogHandlers {
 export function useProviderDialogHandlers(options: {
   config: Config;
   historyManager: HistoryReporter;
+  /** Where the chosen provider is recorded, so it survives a restart. */
+  settings: ProviderPreferenceWriter;
   closeProviderDialog: () => void;
   closeAddProviderDialog: () => void;
 }): ProviderDialogHandlers {
   const {
     config,
     historyManager,
+    settings,
     closeProviderDialog,
     closeAddProviderDialog,
   } = options;
@@ -46,6 +53,9 @@ export function useProviderDialogHandlers(options: {
       closeProviderDialog();
       try {
         await config.switchOpenAiProvider(providerId);
+        // Persisted only after the switch succeeded, so a rejected provider is
+        // never the one the next session starts on.
+        persistProviderId(settings, providerId);
         historyManager.addItem({
           type: MessageType.INFO,
           text: `Switched to provider ${providerId}. Run /model list to pick a model, or /provider to switch again.`,
@@ -59,7 +69,7 @@ export function useProviderDialogHandlers(options: {
         });
       }
     },
-    [config, closeProviderDialog, historyManager],
+    [config, settings, closeProviderDialog, historyManager],
   );
 
   const handleAddProviderSubmit = useCallback(
@@ -70,6 +80,7 @@ export function useProviderDialogHandlers(options: {
         // Switch straight away: saving an endpoint the session does not use
         // leaves the user unsure whether it worked.
         await config.switchOpenAiProvider(values.id);
+        persistProviderId(settings, values.id);
         const keyNote = saved.apiKeyEnv
           ? ` Its API key was stored in ${saved.envPath} as ${saved.apiKeyEnv}.`
           : '';
@@ -86,7 +97,7 @@ export function useProviderDialogHandlers(options: {
         });
       }
     },
-    [config, closeAddProviderDialog, historyManager],
+    [config, settings, closeAddProviderDialog, historyManager],
   );
 
   return { handleProviderSelect, handleAddProviderSubmit };

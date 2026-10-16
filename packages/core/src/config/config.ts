@@ -656,6 +656,11 @@ export interface ConfigParameters {
   includeDirectories?: string[];
   bugCommand?: BugCommandSettings;
   model: string;
+  // Fork-owned: the OpenAI-compatible provider the previous session used, read
+  // from `security.auth.openAiProviderId` by the CLI. Without it a restart fell
+  // back to the provider file's first entry. See
+  // `core/openai/integration.ts`.
+  openAiProviderId?: string;
   disableLoopDetection?: boolean;
   maxSessionTurns?: number;
   acpMode?: boolean;
@@ -1445,6 +1450,11 @@ export class Config implements McpContext, AgentLoopContext {
     this.geminiClient = new GeminiClient(this);
     this.a2aClientManager = new A2AClientManager(this);
     this.modelRouterService = new ModelRouterService(this);
+    // Fork-owned: seed the session with the provider the user last chose, so a
+    // restart does not fall back to the provider file's first entry. Read from
+    // `security.auth.openAiProviderId` by the CLI. Kept last so it runs through
+    // the normalising setter only once the rest of the Config exists.
+    this.setActiveOpenAiProvider(params.openAiProviderId);
   }
 
   isInitialized(): boolean {
@@ -1953,19 +1963,21 @@ export class Config implements McpContext, AgentLoopContext {
   }
 
   /**
-   * The provider profile chosen for this session, if any.
+   * The provider profile this session uses, if any.
    *
-   * Set by `/provider` and read when the OpenAI content generator config is
-   * built. It is intentionally session-scoped: the persisted default lives in
-   * the provider file and in `GEMINI_OPENAI_PROVIDER`, so nothing here needs to
-   * survive a restart.
+   * Set by `/provider`, and seeded at startup from the CLI's persisted
+   * `security.auth.openAiProviderId`, so a restart keeps the choice the user
+   * made. Read when the OpenAI content generator config is built.
    */
   getActiveOpenAiProviderId(): string | undefined {
     return this.activeOpenAiProviderId;
   }
 
   setActiveOpenAiProvider(providerId: string | undefined): void {
-    this.activeOpenAiProviderId = providerId;
+    // Normalised so an empty setting behaves like "no choice" rather than
+    // naming a provider called "".
+    this.activeOpenAiProviderId =
+      providerId && providerId.trim().length > 0 ? providerId : undefined;
   }
 
   /**
