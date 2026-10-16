@@ -7,7 +7,7 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync, rmSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { wasmLoader } from 'esbuild-plugin-wasm';
 
@@ -31,6 +31,14 @@ const pkg = require(path.resolve(__dirname, 'package.json'));
 const SINGLE_FILE = process.env.SINGLE_FILE === 'true';
 const OUT_DIR = SINGLE_FILE ? 'bundle-single' : 'bundle';
 const CLI_ENTRY_FILE = SINGLE_FILE ? 'gemini.mjs' : 'gemini.js';
+
+// esbuild rewrites the chunk files it emits but never removes the ones a
+// previous build left behind, because chunk names are content hashes. Stale
+// chunks then ship: `npm pack ./bundle` copies the whole directory, so an old
+// chunk containing code that has since been fixed rides along as a dead file —
+// and any grep for "is the fix in the artifact?" finds the old text and says no.
+// Clearing first makes the directory describe exactly one build.
+rmSync(OUT_DIR, { recursive: true, force: true });
 
 function createWasmPlugins() {
   const wasmBinaryPlugin = {
