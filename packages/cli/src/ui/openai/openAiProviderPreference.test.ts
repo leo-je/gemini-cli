@@ -15,6 +15,7 @@ import {
   persistProviderId,
   providerHasDefaultModel,
   readPersistedProviderId,
+  rememberModelForProvider,
 } from './openAiProviderPreference.js';
 
 describe('readPersistedProviderId', () => {
@@ -119,5 +120,90 @@ describe('providerHasDefaultModel', () => {
     // `loadProviderEntries` returns an empty list for an absent file, which is
     // the normal single-endpoint state and must not open the model list.
     expect(providerHasDefaultModel('anything')).toBe(true);
+  });
+});
+
+describe('rememberModelForProvider', () => {
+  let fakeHome: string;
+
+  function writeProviders(providers: unknown[]): void {
+    const file = getOpenAiProvidersPath();
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, JSON.stringify({ providers }, null, 2), {
+      encoding: 'utf8',
+      mode: 0o600,
+    });
+  }
+
+  function readProviders(): Array<{ id: string; modelId?: string }> {
+    return JSON.parse(fs.readFileSync(getOpenAiProvidersPath(), 'utf8'))
+      .providers as Array<{ id: string; modelId?: string }>;
+  }
+
+  beforeEach(() => {
+    fakeHome = fs.mkdtempSync(path.join(os.tmpdir(), 'remember-model-home-'));
+    vi.stubEnv('HOME', fakeHome);
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    fs.rmSync(fakeHome, { recursive: true, force: true });
+  });
+
+  it('records the pick as the provider default, so a restart restores it', () => {
+    // Regression: the OpenAI model list has no "remember" toggle, so a pick was
+    // applied for the session only and every restart fell back to `auto`.
+    writeProviders([
+      { id: 'openrouter', baseUrl: 'https://openrouter.ai/v1' },
+      { id: 'other', baseUrl: 'https://other/v1', modelId: 'keep-me' },
+    ]);
+
+    rememberModelForProvider('openrouter', 'anthropic/claude-haiku-5.5');
+
+    expect(readProviders()).toEqual([
+      {
+        id: 'openrouter',
+        baseUrl: 'https://openrouter.ai/v1',
+        modelId: 'anthropic/claude-haiku-5.5',
+      },
+      { id: 'other', baseUrl: 'https://other/v1', modelId: 'keep-me' },
+    ]);
+    // The pick is now the provider's default, which is what startup reads.
+    expect(providerHasDefaultModel('openrouter')).toBe(true);
+  });
+
+  it('overwrites a previous choice for the same provider', () => {
+    writeProviders([
+      { id: 'openrouter', baseUrl: 'https://openrouter.ai/v1', modelId: 'old' },
+    ]);
+
+    rememberModelForProvider('openrouter', 'new');
+
+    expect(readProviders()[0].modelId).toBe('new');
+  });
+
+  it('does nothing without an active provider', () => {
+    // An env-configured single endpoint keeps GEMINI_OPENAI_MODELID as its
+    // persistent source; there is no provider entry to write.
+    writeProviders([{ id: 'openrouter', baseUrl: 'https://openrouter.ai/v1' }]);
+
+    rememberModelForProvider(undefined, 'some-model');
+
+    expect(readProviders()[0].modelId).toBeUndefined();
+  });
+
+  it('does nothing for a blank model id', () => {
+    writeProviders([{ id: 'openrouter', baseUrl: 'https://openrouter.ai/v1' }]);
+
+    rememberModelForProvider('openrouter', '   ');
+
+    expect(readProviders()[0].modelId).toBeUndefined();
+  });
+
+  it('does not throw when the provider file cannot be written', () => {
+    // No file at all: the session must keep working.
+    expect(() =>
+      rememberModelForProvider('openrouter', 'some-model'),
+    ).not.toThrow();
   });
 });

@@ -32,7 +32,10 @@ import { useKeypress } from '../hooks/useKeypress.js';
 import { theme } from '../semantic-colors.js';
 import { DescriptiveRadioButtonSelect } from './shared/DescriptiveRadioButtonSelect.js';
 import { ConfigContext } from '../contexts/ConfigContext.js';
-import { OpenAiModelDialog } from '../openai/index.js';
+import {
+  OpenAiModelDialog,
+  rememberModelForProvider,
+} from '../openai/index.js';
 import { useSettings } from '../contexts/SettingsContext.js';
 
 interface ModelDialogProps {
@@ -370,6 +373,15 @@ export function ModelDialog({
         onSelect={(modelId) => {
           if (config) {
             config.setModel(modelId, persistMode ? false : true);
+            // Fork-owned: the "remember for future sessions" control lives
+            // below this early return, so it never renders in OpenAI mode and
+            // in practice the flag keeps its `false` default — a pick was
+            // applied for the session only (`isTemporary`). Recording it as the
+            // provider's own model is what survives a restart.
+            rememberModelForProvider(
+              config.getActiveOpenAiProviderId(),
+              modelId,
+            );
             const event = new ModelSlashCommandEvent(modelId);
             logModelSlashCommand(config, event);
           }

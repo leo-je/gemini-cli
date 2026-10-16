@@ -6,6 +6,9 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { act } from 'react';
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import { ModelDialog } from './ModelDialog.js';
 import { renderWithProviders } from '../../test-utils/render.js';
 import { waitFor } from '../../test-utils/async.js';
@@ -513,6 +516,69 @@ describe('<ModelDialog />', () => {
       expect(output).not.toContain(DEFAULT_GEMINI_MODEL);
 
       vi.unstubAllGlobals();
+      unmount();
+    });
+
+    it('remembers the pick as the active provider model', async () => {
+      // Regression: this branch returns before the "Remember model for future
+      // sessions" control is rendered, so the pick was applied with
+      // `isTemporary` and every restart came back on `auto`.
+      const fakeHome = fs.mkdtempSync(
+        path.join(os.tmpdir(), 'model-pick-home-'),
+      );
+      const file = path.join(fakeHome, '.gemini', 'openai-providers.json');
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      fs.writeFileSync(
+        file,
+        JSON.stringify({
+          providers: [
+            { id: 'openrouter', baseUrl: 'https://openrouter.ai/api/v1' },
+          ],
+        }),
+        { encoding: 'utf8', mode: 0o600 },
+      );
+      vi.stubEnv('HOME', fakeHome);
+      vi.stubGlobal(
+        'fetch',
+        vi
+          .fn()
+          .mockResolvedValue(
+            new Response(
+              JSON.stringify({ data: [{ id: 'anthropic/claude-haiku-5.5' }] }),
+              { status: 200 },
+            ),
+          ),
+      );
+
+      const config = {
+        ...mockConfig,
+        getActiveOpenAiProviderId: () => 'openrouter',
+        getContentGeneratorConfig: () => ({
+          authType: AuthType.USE_OPENAI,
+          baseUrl: 'https://openrouter.ai/api/v1',
+        }),
+      } as unknown as Config;
+
+      const { stdin, waitUntilReady, unmount } = await renderComponent(
+        config,
+        AuthType.USE_OPENAI,
+        'https://openrouter.ai/api/v1',
+      );
+      await waitUntilReady();
+
+      await act(async () => {
+        stdin.write('\r');
+      });
+      await waitUntilReady();
+
+      const written = JSON.parse(fs.readFileSync(file, 'utf8')) as {
+        providers: Array<{ modelId?: string }>;
+      };
+      expect(written.providers[0].modelId).toBe('anthropic/claude-haiku-5.5');
+
+      vi.unstubAllEnvs();
+      vi.unstubAllGlobals();
+      fs.rmSync(fakeHome, { recursive: true, force: true });
       unmount();
     });
 

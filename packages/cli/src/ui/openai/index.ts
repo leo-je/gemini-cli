@@ -34,3 +34,8 @@ export {
   type NewProviderValues,
 } from './AddProviderDialog.js';
 export { addOpenAiProvider, apiKeyEnvName } from './addProvider.js';
+export {
+  providerHasDefaultModel,
+  rememberModelForProvider,
+  type ProviderPreferenceWriter,
+} from './openAiProviderPreference.js';

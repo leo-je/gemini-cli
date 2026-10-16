@@ -29,7 +29,10 @@ import {
   type LoadableSettingScope,
   type MergedSettings,
 } from '../../config/settings.js';
-import { loadProviderEntries } from '@google/gemini-cli-core';
+import {
+  loadProviderEntries,
+  persistProviderModelId,
+} from '@google/gemini-cli-core';
 
 /** The persisted provider choice, under `security.auth`. */
 export const OPENAI_PROVIDER_SETTING_KEY = 'security.auth.openAiProviderId';
@@ -113,4 +116,32 @@ export function providerHasDefaultModel(providerId: string): boolean {
   } catch {
     return true;
   }
+}
+
+/**
+ * Records the model the user picked from a provider's catalog.
+ *
+ * The OpenAI model list offers no "remember this" control: `ModelDialog` returns
+ * the fork's dialog before the Gemini branch renders that toggle, so in practice
+ * the flag keeps its `false` default and every pick was applied with
+ * `isTemporary`, i.e. for this session only. Restarting then showed the
+ * provider's default or `auto`.
+ *
+ * Written as the provider's own `modelId` rather than into the Gemini model
+ * setting, so one provider cannot inherit another's model and a Gemini session
+ * keeps its own selection. `refreshAuth` already pins a provider's `modelId` at
+ * startup, so restoring the choice needs nothing else.
+ *
+ * Nothing to do without an active provider — an env-configured single endpoint
+ * keeps `GEMINI_OPENAI_MODELID` as its persistent source. Best effort, like the
+ * other writers here: a read-only home directory must not break the session.
+ */
+export function rememberModelForProvider(
+  providerId: string | undefined,
+  modelId: string,
+): void {
+  if (!providerId || modelId.trim().length === 0) {
+    return;
+  }
+  persistProviderModelId(providerId, modelId);
 }

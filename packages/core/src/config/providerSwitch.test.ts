@@ -165,6 +165,24 @@ describe('Config.switchOpenAiProvider', () => {
     ).toBeUndefined();
   });
 
+  it('opens on the provider model, so a remembered pick survives a restart', async () => {
+    // What `rememberModelForProvider` (CLI side) relies on: the pick is written
+    // as the provider's own `modelId`, and startup pins it. Without this the
+    // session came back on `auto`.
+    writeProviders([
+      { id: 'beta', baseUrl: 'https://beta/v1', modelId: 'remembered-model' },
+    ]);
+    const config = makeConfig({
+      openAiProviderId: 'beta',
+      model: 'auto',
+    });
+
+    await config.refreshAuth(AuthType.USE_OPENAI);
+
+    expect(config.getModel()).toBe('remembered-model');
+    expect(config.getActiveModel()).toBe('remembered-model');
+  });
+
   it('falls back to the first provider when the persisted id is gone', async () => {
     // A persisted choice can outlive its provider: the CLI writes the selection
     // to settings.json while the provider file is edited by hand. Startup must
