@@ -73,9 +73,15 @@ export function applyProviderToContentGeneratorConfig(options: {
     return;
   }
 
+  // `allowImplicitProvider` because this call *is* the session setup for the
+  // auth type the CLI already committed to. The gate that decided OpenAI mode
+  // was usable resolved the provider file's first entry; this must resolve the
+  // same profile or the session ends up with no endpoint. See
+  // `resolveActiveProvider` for the full reasoning.
   const provider = resolveActiveProvider({
     sessionProviderId: config?.getActiveOpenAiProviderId?.(),
     env: config?.env,
+    allowImplicitProvider: true,
   });
 
   contentGeneratorConfig.providerId = provider?.id;
@@ -108,30 +114,50 @@ export function applyProviderToContentGeneratorConfig(options: {
 /**
  * Resolves the provider profile this session should talk to, if any.
  *
- * Only an *explicit* opt-in is honoured: a requested id, a session-scoped choice
- * made by `/provider`, or `GEMINI_OPENAI_PROVIDER`. A bare provider file is
- * deliberately not enough — reading it unconditionally would make every caller
- * of `createContentGeneratorConfig` (embedding-only sessions, tests passing a
- * stub `Config`, subagents) depend on the user's personal provider file.
+ * An *explicit* opt-in is always honoured first: a requested id, a
+ * session-scoped choice made by `/provider`, or `GEMINI_OPENAI_PROVIDER`.
  *
- * `undefined` therefore means "no provider involvement": the caller keeps the
- * upstream behaviour where the ambient variables describe the endpoint.
+ * `allowImplicitProvider` decides what happens when none of those exist:
+ *
+ *   - `false` (default) returns `undefined`, meaning "no provider
+ *     involvement". Every generic caller of `createContentGeneratorConfig`
+ *     keeps the upstream behaviour where the ambient variables describe the
+ *     endpoint, and nothing depends on the user's personal provider file.
+ *     Use this from opt-in paths such as `/provider`.
+ *   - `true` falls back to the provider file's first entry. Use this only where
+ *     the caller is already committed to OpenAI-compatible mode, because the
+ *     answer has to agree with the CLI's auth gate: that gate treats a
+ *     configured provider file as enough to skip the endpoint dialog
+ *     (`hasResolvableOpenAiProvider` resolves the file's first entry the same
+ *     way). When the two disagree, the dialog is skipped and the session is
+ *     then built with no endpoint at all, which surfaces as
+ *     "OpenAI-compatible mode requires GEMINI_OPENAI_BASE_URL to be set."
+ *
+ * `resolveProvider` is what supplies the first-entry fallback: an empty
+ * `requestedId` resolves to entry zero.
  */
 export function resolveActiveProvider(options: {
   requestedId?: string;
   sessionProviderId?: string;
   env?: Record<string, string>;
+  allowImplicitProvider?: boolean;
 }): OpenAiProviderProfile | undefined {
-  const { requestedId, sessionProviderId, env } = options;
+  const { requestedId, sessionProviderId, env, allowImplicitProvider } =
+    options;
   const choice = requestedId ?? sessionProviderId;
   const envChoice = env?.[OPENAI_PROVIDER_ENV];
-  if (!choice && !envChoice) {
+  if (!choice && !envChoice && !allowImplicitProvider) {
     return undefined;
   }
   if (choice) {
     return resolveProvider(choice, undefined, env);
   }
-  return resolveProviderFromEnv(env);
+  if (envChoice) {
+    return resolveProviderFromEnv(env);
+  }
+  // Committed to OpenAI-compatible mode with no explicit choice: the file's
+  // first entry is the session's endpoint, exactly as the auth gate decided.
+  return resolveProvider(undefined, undefined, env);
 }
 
 /**
@@ -145,10 +171,16 @@ export function resolveActiveProvider(options: {
  * collects exactly those two, and a provider without a model id cannot
  * satisfy what the dialog would have provided.
  *
- * Deliberately swallow errors: a malformed provider file must degrade to
- * "not configured" (the dialog) rather than become a new startup failure.
- * This is only ever called from the OpenAI auth path, so reading the file
- * here keeps the no-implicit-read rule of `resolveActiveProvider` intact.
+ * This definition of "usable" is the contract the session-building path must
+ * honour: the gate skipping the dialog only works if
+ * `applyProviderToContentGeneratorConfig` can then resolve the same profile
+ * (it passes `allowImplicitProvider: true` for exactly that reason). Keep the
+ * two in step — if this accepts something the builder cannot resolve, the
+ * session ends up with no endpoint and fails at construction instead.
+ *
+ * Deliberately swallow errors: a malformed provider file, or one whose
+ * permissions the loader rejects, must degrade to "not configured" (the
+ * dialog) rather than become a new startup failure.
  */
 export function hasResolvableOpenAiProvider(
   env?: Record<string, string | undefined>,
