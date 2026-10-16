@@ -185,9 +185,19 @@ describe('readEnvWithFallback', () => {
   });
 
   it('returns undefined when neither is set', () => {
-    expect(
-      readEnvWithFallback('GEMINI_OPENAI_MODELID', 'GEMINI_MODEL', {}),
-    ).toBeUndefined();
+    // `readEnvValue` consults the process environment for anything `configEnv`
+    // does not define, so an exported GEMINI_MODEL would otherwise make this
+    // assert the developer's shell rather than the code.
+    const previous = process.env['GEMINI_MODEL'];
+    delete process.env['GEMINI_MODEL'];
+    try {
+      expect(
+        readEnvWithFallback('GEMINI_OPENAI_MODELID', 'GEMINI_MODEL', {}),
+      ).toBeUndefined();
+    } finally {
+      if (previous === undefined) delete process.env['GEMINI_MODEL'];
+      else process.env['GEMINI_MODEL'] = previous;
+    }
   });
 
   it('falls back to the process environment', () => {

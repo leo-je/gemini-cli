@@ -89,10 +89,17 @@ interface PartialToolCall {
 export class OpenAIContentGenerator implements ContentGenerator {
   private readonly client: OpenAICompatibleClient;
   private readonly configuredModelId: string | undefined;
+  /**
+   * The model resolved for this session and pinned onto the config by
+   * `refreshAuth` / `/provider`. Preferred over the environment variables when
+   * a selection has to be discarded; see `resolveModelId`.
+   */
+  private readonly configModelId: string | undefined;
   private readonly gcConfig: Config;
 
   constructor(config: ContentGeneratorConfig, gcConfig: Config) {
     this.gcConfig = gcConfig;
+    this.configModelId = config.modelId;
     this.configuredModelId = readEnvWithFallback(
       OPENAI_MODEL_ID_ENV,
       OPENAI_MODEL_ID_FALLBACK_ENV,
@@ -115,29 +122,40 @@ export class OpenAIContentGenerator implements ContentGenerator {
    * Resolves the model to send to the endpoint.
    *
    * The CLI's own selection wins, so `/model list`, `/model set <name>`, and
-   * `--model` take effect without a restart. `GEMINI_OPENAI_MODELID` (or,
-   * failing that, `GEMINI_MODEL`) supplies the initial value and remains the
-   * fallback for a session that never chose one.
+   * `--model` take effect without a restart.
    *
    * A Gemini alias or model name is never forwarded: the rest of the CLI still
    * reasons in Gemini names, so `auto` or `gemini-3-pro` would reach an endpoint
-   * that has never heard of it. Falling back to the configured id keeps the
-   * request one the endpoint can actually serve.
+   * that has never heard of it. Such a selection is replaced by the session's
+   * own model, which is what `refreshAuth` and `/provider` already resolved and
+   * pinned onto the content-generator config.
+   *
+   * `GEMINI_OPENAI_MODELID` / `GEMINI_MODEL` are read as well, for a
+   * single-endpoint configuration that never went through a provider profile.
+   * They used to be the only fallback, which broke a provider-based session
+   * whenever the endpoint's own catalog offered a Gemini-named model — a local
+   * proxy serving `gemini-*` is exactly that case: the pick was discarded and
+   * the session then failed with a message about environment variables the user
+   * had no reason to set.
    */
   private resolveModelId(): string {
-    const configured = this.configuredModelId;
     const selected = this.gcConfig.getActiveModel();
 
     if (selected && !isAutoModel(selected) && !isGeminiModelName(selected)) {
       return selected;
     }
 
-    if (!configured) {
+    // Pinned first: it is the model this session actually resolved, so it stays
+    // correct for a provider-based configuration and cannot send one provider's
+    // model to another. The ambient variables remain the fallback for a
+    // single-endpoint setup, which has no pinned model.
+    const fallback = this.configModelId ?? this.configuredModelId;
+    if (!fallback) {
       throw new Error(
-        `${OPENAI_MODEL_ID_ENV} (or ${OPENAI_MODEL_ID_FALLBACK_ENV}) must be set when GEMINI_API_TYPE=openai.`,
+        `No model to send to the OpenAI-compatible endpoint. Pick one with /model list, or set ${OPENAI_MODEL_ID_ENV} (or ${OPENAI_MODEL_ID_FALLBACK_ENV}).`,
       );
     }
-    return configured;
+    return fallback;
   }
 
   async generateContent(

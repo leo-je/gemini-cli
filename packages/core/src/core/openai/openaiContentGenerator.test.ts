@@ -80,7 +80,11 @@ const baseRequest = {
 
 describe('OpenAIContentGenerator', () => {
   beforeEach(() => {
+    // Both variables are cleared, not just the OpenAI-named one: it falls back
+    // to GEMINI_MODEL, so a developer with that exported would otherwise get a
+    // real request attempt instead of the expected resolution error.
     vi.stubEnv('GEMINI_OPENAI_MODELID', '');
+    vi.stubEnv('GEMINI_MODEL', '');
   });
 
   afterEach(() => {
@@ -92,7 +96,80 @@ describe('OpenAIContentGenerator', () => {
     const generator = makeGenerator();
     await expect(
       generator.generateContentStream(baseRequest, 'p', LlmRole.MAIN),
-    ).rejects.toThrow('GEMINI_OPENAI_MODELID');
+    ).rejects.toThrow('No model to send to the OpenAI-compatible endpoint');
+  });
+
+  it('falls back to the model pinned on the config when the pick is rejected', async () => {
+    // Regression: selecting a Gemini-named model from the endpoint's own
+    // catalog (a local proxy serving `gemini-*` is the common case) discarded
+    // the pick and then failed, because the only fallback was the environment
+    // variables — which a provider-based setup has no reason to set.
+    const fetchMock = vi.fn().mockResolvedValue(
+      sseResponse([
+        dataFrame({
+          choices: [{ delta: { content: 'hi' }, finish_reason: 'stop' }],
+        }),
+        'data: [DONE]\n\n',
+      ]),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    // `makeGenerator` defaults the active selection to `gemini-3-pro`, which the
+    // carve-out rejects. No GEMINI_MODEL in the env, as in the reported setup.
+    const generator = makeGenerator({}, { modelId: 'provider-pinned-model' });
+    await collectChunks(
+      await generator.generateContentStream(baseRequest, 'p', LlmRole.MAIN),
+    );
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(JSON.parse(init.body as string).model).toBe('provider-pinned-model');
+  });
+
+  it('prefers the pinned model over the env variables when a pick is rejected', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      sseResponse([
+        dataFrame({
+          choices: [{ delta: { content: 'hi' }, finish_reason: 'stop' }],
+        }),
+        'data: [DONE]\n\n',
+      ]),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    // The session's own model describes the endpoint actually in use, so it
+    // cannot send one provider's model to another.
+    const generator = makeGenerator(
+      { GEMINI_OPENAI_MODELID: 'env-model' },
+      { modelId: 'provider-pinned-model' },
+    );
+    await collectChunks(
+      await generator.generateContentStream(baseRequest, 'p', LlmRole.MAIN),
+    );
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(JSON.parse(init.body as string).model).toBe('provider-pinned-model');
+  });
+
+  it('still uses the env model for a single-endpoint setup with no pinned model', async () => {
+    // The fallback path that existed before must keep working: nothing pinned,
+    // selection rejected, so the ambient variable describes the endpoint.
+    const fetchMock = vi.fn().mockResolvedValue(
+      sseResponse([
+        dataFrame({
+          choices: [{ delta: { content: 'hi' }, finish_reason: 'stop' }],
+        }),
+        'data: [DONE]\n\n',
+      ]),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const generator = makeGenerator({ GEMINI_OPENAI_MODELID: 'env-model' });
+    await collectChunks(
+      await generator.generateContentStream(baseRequest, 'p', LlmRole.MAIN),
+    );
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(JSON.parse(init.body as string).model).toBe('env-model');
   });
 
   it('sends the configured model id, not the requested Gemini one', async () => {
@@ -246,7 +323,7 @@ describe('OpenAIContentGenerator', () => {
     const generator = makeGenerator({}, {}, 'auto');
     await expect(
       generator.generateContentStream(baseRequest, 'p', LlmRole.MAIN),
-    ).rejects.toThrow('GEMINI_OPENAI_MODELID');
+    ).rejects.toThrow('No model to send to the OpenAI-compatible endpoint');
   });
 
   it('sends headers configured through GEMINI_OPENAI_HEADERS', async () => {
