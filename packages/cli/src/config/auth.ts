@@ -29,10 +29,7 @@ import { loadEnvironment, loadSettings } from './settings.js';
 export function isOpenAiEndpointConfigured(): boolean {
   loadEnvironment(loadSettings().merged, process.cwd());
 
-  const hasBaseUrl = Boolean(
-    process.env[OPENAI_BASE_URL_ENV] ||
-      process.env[OPENAI_BASE_URL_FALLBACK_ENV],
-  );
+  const hasBaseUrl = hasOpenAiBaseUrl();
   const hasModelId = Boolean(
     process.env[OPENAI_MODEL_ID_ENV] ||
       process.env[OPENAI_MODEL_ID_FALLBACK_ENV],
@@ -46,6 +43,26 @@ export function isOpenAiEndpointConfigured(): boolean {
   // this check a provider-only setup would be sent to the endpoint dialog
   // on every start.
   return hasResolvableOpenAiProvider({ ...process.env });
+}
+
+/**
+ * Whether `.env` (or the environment) already names an endpoint base URL.
+ *
+ * Distinguishes a first run — nothing configured, where a provider profile is
+ * the durable way to get started — from a partially filled environment, where
+ * the user clearly meant to configure the single-endpoint form and only the
+ * model is missing. Both cases reach the auth dialog; the caller picks which
+ * one to open.
+ *
+ * Reloads `.env` first, like `isOpenAiEndpointConfigured`, so a value just
+ * written is seen without a restart.
+ */
+export function hasOpenAiBaseUrl(): boolean {
+  loadEnvironment(loadSettings().merged, process.cwd());
+  return Boolean(
+    process.env[OPENAI_BASE_URL_ENV] ||
+      process.env[OPENAI_BASE_URL_FALLBACK_ENV],
+  );
 }
 
 export async function validateAuthMethod(

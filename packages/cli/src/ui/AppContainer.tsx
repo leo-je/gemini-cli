@@ -105,7 +105,10 @@ import { useModelCommand } from './hooks/useModelCommand.js';
 import { useProviderCommand } from './hooks/useProviderCommand.js';
 import { useProviderDialogHandlers } from './openai/useProviderDialogHandlers.js';
 import {
+  addOpenAiProvider,
   applyOpenAiEndpointEnv,
+  persistProviderId,
+  type NewProviderValues,
   type OpenAiEndpointEnv,
 } from './openai/index.js';
 import { useVoiceModelCommand } from './hooks/useVoiceModelCommand.js';
@@ -1102,6 +1105,36 @@ Logging in with Google... Restarting Gemini CLI to continue.
     // Go back to auth method selection
     setAuthState(AuthState.Updating);
   }, [setAuthState]);
+
+  /**
+   * The first-run counterpart of `handleOpenAiEndpointSubmit`: with nothing
+   * configured, the auth dialog offers a provider profile instead of the
+   * single-endpoint environment form, so the result is durable and every
+   * provider keeps its own model.
+   *
+   * Switching is part of the submit rather than a follow-up step — saving a
+   * profile the session does not use leaves the user unsure whether it worked,
+   * and the refresh below has to see the new endpoint.
+   */
+  const handleOpenAiProviderSubmit = useCallback(
+    async (values: NewProviderValues) => {
+      try {
+        onAuthError(null);
+        addOpenAiProvider(values);
+        await config.switchOpenAiProvider(values.id);
+        await config.refreshAuth(AuthType.USE_OPENAI);
+        persistProviderId(settings, values.id);
+        setAuthState(AuthState.Authenticated);
+      } catch (e) {
+        onAuthError(
+          `Failed to add the provider: ${
+            e instanceof Error ? e.message : String(e)
+          }`,
+        );
+      }
+    },
+    [setAuthState, onAuthError, config, settings],
+  );
 
   // Sync user tier from config when authentication changes
   useEffect(() => {
@@ -3106,6 +3139,7 @@ Logging in with Google... Restarting Gemini CLI to continue.
       handleApiKeyCancel,
       handleOpenAiEndpointSubmit,
       handleOpenAiEndpointCancel,
+      handleOpenAiProviderSubmit,
       setBannerVisible,
       setShortcutsHelpVisible,
       setCleanUiDetailsVisible,
@@ -3215,6 +3249,7 @@ Logging in with Google... Restarting Gemini CLI to continue.
       handleApiKeyCancel,
       handleOpenAiEndpointSubmit,
       handleOpenAiEndpointCancel,
+      handleOpenAiProviderSubmit,
       setBannerVisible,
       setShortcutsHelpVisible,
       setCleanUiDetailsVisible,

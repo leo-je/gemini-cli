@@ -35,7 +35,9 @@ export {
 } from './AddProviderDialog.js';
 export { addOpenAiProvider, apiKeyEnvName } from './addProvider.js';
 export {
+  persistProviderId,
   providerHasDefaultModel,
+  readPersistedProviderId,
   rememberModelForProvider,
   type ProviderPreferenceWriter,
 } from './openAiProviderPreference.js';

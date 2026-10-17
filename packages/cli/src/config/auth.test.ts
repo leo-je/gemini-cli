@@ -6,7 +6,11 @@
 
 import { AuthType } from '@google/gemini-cli-core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { isOpenAiEndpointConfigured, validateAuthMethod } from './auth.js';
+import {
+  hasOpenAiBaseUrl,
+  isOpenAiEndpointConfigured,
+  validateAuthMethod,
+} from './auth.js';
 
 vi.mock('@google/gemini-cli-core', async (importOriginal) => {
   const actual =
@@ -221,5 +225,43 @@ describe('isOpenAiEndpointConfigured', () => {
       vi.stubEnv(key, value as string);
     }
     expect(isOpenAiEndpointConfigured()).toBe(expected);
+  });
+});
+
+describe('hasOpenAiBaseUrl', () => {
+  beforeEach(() => {
+    vi.stubEnv('GEMINI_OPENAI_BASE_URL', undefined);
+    vi.stubEnv('GOOGLE_GEMINI_BASE_URL', undefined);
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  // The auth dialog uses this to tell a first run (nothing configured — offer a
+  // provider) from a half-finished environment (a base URL is already there, so
+  // finish the single-endpoint form instead).
+  it.each([
+    { description: 'nothing set', envs: {}, expected: false },
+    {
+      description: 'the OpenAI name',
+      envs: { GEMINI_OPENAI_BASE_URL: 'https://api.example/v1' },
+      expected: true,
+    },
+    {
+      description: 'the Gemini fallback name',
+      envs: { GOOGLE_GEMINI_BASE_URL: 'https://api.example/v1' },
+      expected: true,
+    },
+    {
+      description: 'an empty string, which counts as unset',
+      envs: { GEMINI_OPENAI_BASE_URL: '' },
+      expected: false,
+    },
+  ])('returns $expected when there is $description', ({ envs, expected }) => {
+    for (const [key, value] of Object.entries(envs)) {
+      vi.stubEnv(key, value as string);
+    }
+    expect(hasOpenAiBaseUrl()).toBe(expected);
   });
 });

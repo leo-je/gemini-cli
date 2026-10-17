@@ -588,6 +588,7 @@ const mockUIActions: UIActions = {
   handleApiKeySubmit: vi.fn(),
   handleApiKeyCancel: vi.fn(),
   handleOpenAiEndpointSubmit: vi.fn(),
+  handleOpenAiProviderSubmit: vi.fn(),
   handleOpenAiEndpointCancel: vi.fn(),
   setBannerVisible: vi.fn(),
   setShortcutsHelpVisible: vi.fn(),

@@ -15,7 +15,8 @@ import { AuthInProgress } from '../auth/AuthInProgress.js';
 import { AuthDialog } from '../auth/AuthDialog.js';
 import { BannedAccountDialog } from '../auth/BannedAccountDialog.js';
 import { ApiAuthDialog } from '../auth/ApiAuthDialog.js';
-import { OpenAiEndpointDialog } from '../openai/index.js';
+import { AddProviderDialog, OpenAiEndpointDialog } from '../openai/index.js';
+import { hasOpenAiBaseUrl } from '../../config/auth.js';
 import { ProviderDialogs } from '../openai/ProviderDialogs.js';
 import { EditorSettingsDialog } from './EditorSettingsDialog.js';
 import { PrivacyNotice } from '../privacy/PrivacyNotice.js';
@@ -329,13 +330,27 @@ export const DialogManager = ({
     );
   }
   if (uiState.isAwaitingOpenAiEndpoint) {
+    // Fork-owned: `isOpenAiEndpointConfigured` is false both when nothing is
+    // configured and when `.env` has a base URL but no model. A base URL means
+    // the user already started the single-endpoint form, so finish it there;
+    // with nothing at all this is a first run, and a provider profile is the
+    // durable way in — it persists, allows several endpoints, and remembers a
+    // model per provider.
     return (
       <Box flexDirection="column">
-        <OpenAiEndpointDialog
-          onSubmit={uiActions.handleOpenAiEndpointSubmit}
-          onCancel={uiActions.handleOpenAiEndpointCancel}
-          error={uiState.authError}
-        />
+        {hasOpenAiBaseUrl() ? (
+          <OpenAiEndpointDialog
+            onSubmit={uiActions.handleOpenAiEndpointSubmit}
+            onCancel={uiActions.handleOpenAiEndpointCancel}
+            error={uiState.authError}
+          />
+        ) : (
+          <AddProviderDialog
+            onSubmit={uiActions.handleOpenAiProviderSubmit}
+            onCancel={uiActions.handleOpenAiEndpointCancel}
+            error={uiState.authError}
+          />
+        )}
       </Box>
     );
   }

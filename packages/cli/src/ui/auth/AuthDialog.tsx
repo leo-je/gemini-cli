@@ -24,6 +24,7 @@ import {
 import { useKeypress } from '../hooks/useKeypress.js';
 import { AuthState } from '../types.js';
 import { validateAuthMethodWithSettings } from './useAuth.js';
+import { isOpenAiEndpointConfigured } from '../../config/auth.js';
 import { relaunchApp } from '../../utils/processUtils.js';
 
 interface AuthDialogProps {
@@ -190,6 +191,22 @@ export function AuthDialog({
   );
 
   const handleAuthSelect = async (authMethod: AuthType) => {
+    // Fork-owned: OpenAI mode can be satisfied by a provider profile, which
+    // `validateAuthMethod` knows nothing about — it only reads the environment.
+    // Validating here rejected a first run with "you must specify the
+    // GEMINI_OPENAI_BASE_URL environment variable" before the flow could offer
+    // to collect an endpoint, so the dialog that message was meant to lead to
+    // was unreachable. Let the flow ask instead; `useAuth` picks the form.
+    if (authMethod === AuthType.USE_OPENAI && !isOpenAiEndpointConfigured()) {
+      onAuthError(null);
+      try {
+        await onSelect(authMethod, SettingScope.User);
+      } catch (e) {
+        onAuthError(e instanceof Error ? e.message : String(e));
+      }
+      return;
+    }
+
     const error = await validateAuthMethodWithSettings(
       authMethod,
       settings,

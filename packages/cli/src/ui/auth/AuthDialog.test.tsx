@@ -22,6 +22,7 @@ import { AuthState } from '../types.js';
 import { RadioButtonSelect } from '../components/shared/RadioButtonSelect.js';
 import { useKeypress } from '../hooks/useKeypress.js';
 import { validateAuthMethodWithSettings } from './useAuth.js';
+import { isOpenAiEndpointConfigured } from '../../config/auth.js';
 import { runExitCleanup } from '../../utils/cleanup.js';
 import { Text } from 'ink';
 import { RELAUNCH_EXIT_CODE } from '../../utils/processUtils.js';
@@ -44,6 +45,14 @@ vi.mock('./useAuth.js', () => ({
   validateAuthMethodWithSettings: vi.fn(),
 }));
 
+vi.mock('../../config/auth.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../config/auth.js')>();
+  return {
+    ...actual,
+    isOpenAiEndpointConfigured: vi.fn(),
+  };
+});
+
 vi.mock('../hooks/useKeypress.js', () => ({
   useKeypress: vi.fn(),
 }));
@@ -64,6 +73,8 @@ vi.mock('../components/shared/RadioButtonSelect.js', () => ({
 const mockedUseKeypress = useKeypress as Mock;
 const mockedRadioButtonSelect = RadioButtonSelect as Mock;
 const mockedValidateAuthMethod = validateAuthMethodWithSettings as Mock;
+const mockedIsOpenAiEndpointConfigured =
+  isOpenAiEndpointConfigured as unknown as Mock;
 const mockedRunExitCleanup = runExitCleanup as Mock;
 
 describe('AuthDialog', () => {
@@ -100,6 +111,8 @@ describe('AuthDialog', () => {
       onAuthError: vi.fn(),
       setAuthContext: vi.fn(),
     };
+    // Configured by default: the pre-existing tests all describe that case.
+    mockedIsOpenAiEndpointConfigured.mockReturnValue(true);
   });
 
   afterEach(() => {
@@ -244,6 +257,34 @@ describe('AuthDialog', () => {
       );
       expect(props.onAuthError).toHaveBeenCalledWith('Invalid method');
       expect(props.settings.setValue).not.toHaveBeenCalled();
+      unmount();
+    });
+
+    it('offers the first-run form instead of rejecting an unconfigured OpenAI choice', async () => {
+      // Regression: `validateAuthMethod` only reads the environment, so a fresh
+      // install was answered with "you must specify the GEMINI_OPENAI_BASE_URL
+      // environment variable" and there was no way to configure anything from
+      // inside the CLI.
+      mockedIsOpenAiEndpointConfigured.mockReturnValue(false);
+      const { unmount } = await renderWithProviders(<AuthDialog {...props} />);
+      const { onSelect: handleAuthSelect } =
+        mockedRadioButtonSelect.mock.calls[0][0];
+
+      await handleAuthSelect(AuthType.USE_OPENAI);
+
+      expect(mockedValidateAuthMethod).not.toHaveBeenCalled();
+      expect(props.onAuthError).not.toHaveBeenCalledWith(
+        expect.stringContaining('GEMINI_OPENAI_BASE_URL'),
+      );
+      // The choice is still recorded, and the flow continues from there.
+      expect(props.settings.setValue).toHaveBeenCalledWith(
+        expect.anything(),
+        'security.auth.selectedType',
+        AuthType.USE_OPENAI,
+      );
+      expect(props.setAuthState).toHaveBeenCalledWith(
+        AuthState.Unauthenticated,
+      );
       unmount();
     });
 

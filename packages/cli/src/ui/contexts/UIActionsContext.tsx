@@ -86,6 +86,8 @@ export interface UIActions {
   handleApiKeyCancel: () => void;
   handleOpenAiEndpointSubmit: (settings: OpenAiEndpointEnv) => Promise<void>;
   handleOpenAiEndpointCancel: () => void;
+  /** First run: a provider profile stands in for the environment form. */
+  handleOpenAiProviderSubmit: (values: NewProviderValues) => Promise<void>;
   setBannerVisible: (visible: boolean) => void;
   setShortcutsHelpVisible: (visible: boolean) => void;
   setCleanUiDetailsVisible: (visible: boolean) => void;

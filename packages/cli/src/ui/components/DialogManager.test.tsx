@@ -6,14 +6,25 @@
 
 import { renderWithProviders } from '../../test-utils/render.js';
 import { DialogManager } from './DialogManager.js';
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { Text } from 'ink';
 import { type UIState } from '../contexts/UIStateContext.js';
 import { type QuotaState } from '../contexts/QuotaContext.js';
 import { type RestartReason } from '../hooks/useIdeTrustListener.js';
 import { type IdeInfo } from '@google/gemini-cli-core';
+import { hasOpenAiBaseUrl } from '../../config/auth.js';
 
 // Mock child components
+vi.mock('../openai/AddProviderDialog.js', () => ({
+  AddProviderDialog: () => <Text>AddProviderDialog</Text>,
+}));
+vi.mock('../openai/OpenAiEndpointDialog.js', () => ({
+  OpenAiEndpointDialog: () => <Text>OpenAiEndpointDialog</Text>,
+}));
+vi.mock('../../config/auth.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../config/auth.js')>();
+  return { ...actual, hasOpenAiBaseUrl: vi.fn(() => false) };
+});
 vi.mock('../IdeIntegrationNudge.js', () => ({
   IdeIntegrationNudge: () => <Text>IdeIntegrationNudge</Text>,
 }));
@@ -63,7 +74,13 @@ vi.mock('./AgentConfigDialog.js', () => ({
   AgentConfigDialog: () => <Text>AgentConfigDialog</Text>,
 }));
 
+const mockedHasOpenAiBaseUrl = vi.mocked(hasOpenAiBaseUrl);
+
 describe('DialogManager', () => {
+  beforeEach(() => {
+    mockedHasOpenAiBaseUrl.mockReturnValue(false);
+  });
+
   const defaultProps = {
     addItem: vi.fn(),
     terminalWidth: 100,
@@ -179,6 +196,40 @@ describe('DialogManager', () => {
       'AgentConfigDialog',
     ],
   ];
+
+  it('offers the provider form when a first run has nothing configured', async () => {
+    mockedHasOpenAiBaseUrl.mockReturnValue(false);
+    const { lastFrame, unmount } = await renderWithProviders(
+      <DialogManager {...defaultProps} />,
+      {
+        uiState: {
+          ...baseUiState,
+          isAwaitingOpenAiEndpoint: true,
+        } as Partial<UIState> as UIState,
+      },
+    );
+    expect(lastFrame()).toContain('AddProviderDialog');
+    expect(lastFrame()).not.toContain('OpenAiEndpointDialog');
+    unmount();
+  });
+
+  it('finishes the environment form when a base URL is already set', async () => {
+    // A base URL in `.env` means the single-endpoint form was already started;
+    // only the model is missing, so that form is the one to complete.
+    mockedHasOpenAiBaseUrl.mockReturnValue(true);
+    const { lastFrame, unmount } = await renderWithProviders(
+      <DialogManager {...defaultProps} />,
+      {
+        uiState: {
+          ...baseUiState,
+          isAwaitingOpenAiEndpoint: true,
+        } as Partial<UIState> as UIState,
+      },
+    );
+    expect(lastFrame()).toContain('OpenAiEndpointDialog');
+    expect(lastFrame()).not.toContain('AddProviderDialog');
+    unmount();
+  });
 
   it.each(testCases)(
     'renders %s when state is %o',
