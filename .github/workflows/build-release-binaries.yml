@@ -460,5 +460,9 @@ jobs:
             exit 0
           fi
 
-          npm publish "$TARBALL" --access public
+          # The fork only ships prerelease-suffixed versions (0.1.19-fix.N), and
+          # npm refuses to publish one without an explicit tag. `latest` is the
+          # right default here: `npm install -g gemini-cli-leo` should get the
+          # newest release without the user having to know a tag name.
+          npm publish "$TARBALL" --access public --tag latest
           echo "Published ${NAME}@${VERSION}"
