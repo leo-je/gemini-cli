@@ -17,9 +17,11 @@ import { fileURLToPath } from 'node:url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
-// Scoped to this fork so installing never replaces an existing global install
-// of the upstream `@google/gemini-cli` package.
-export const BUNDLE_PACKAGE_NAME = '@leo-je/gemini-cli';
+// Named after the fork's own program so installing never replaces an existing
+// global install of the upstream `@google/gemini-cli` package. Unscoped: this
+// is the name the release workflow publishes to the public registry, and it is
+// what `npm install -g` takes.
+export const BUNDLE_PACKAGE_NAME = 'gemini-cli-leo';
 
 // Named `gemini-leo` rather than `gemini` so it does not collide with an
 // upstream `gemini` binary already on PATH.

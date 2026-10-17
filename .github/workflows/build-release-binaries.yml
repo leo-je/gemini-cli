@@ -8,6 +8,12 @@ name: 'Build and Release Binaries'
 #
 # 版本号取自 package.json 的 version。同一分支重复推送会复用同一个 tag，
 # 因此不会产生多个 release。
+#
+# 产物命名一律带程序名 gemini-cli-leo：
+#   gemini-cli-leo-<platform>-<version>.tar.gz / .zip   原生二进制（SEA）
+#   gemini-cli-leo-bundle-<platform>-<version>.tgz      JS bundle，可直接 npm i -g
+# 最后一个平台的 bundle 之后会发布到 npm（包名 gemini-cli-leo），用的是仓库
+# secret 里的 NPM_TOKEN。
 on:
   push:
     branches:
@@ -107,7 +113,7 @@ jobs:
         run: |
           $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
           $platform = '${{ matrix.platform_name }}'
-          $archive = "gemini-$platform-$version.zip"
+          $archive = "gemini-cli-leo-$platform-$version.zip"
           $dest = Join-Path $env:RUNNER_TEMP $archive
 
           # Writes to RUNNER_TEMP so the archive cannot land inside the
@@ -129,7 +135,7 @@ jobs:
         run: |
           VERSION=$(node -p "require('./package.json').version")
           PLATFORM="${{ matrix.platform_name }}"
-          ARCHIVE="gemini-$PLATFORM-$VERSION.tar.gz"
+          ARCHIVE="gemini-cli-leo-$PLATFORM-$VERSION.tar.gz"
 
           # Output to RUNNER_TEMP so the archive cannot land inside the
           # directory it is packing.
@@ -143,7 +149,7 @@ jobs:
       - name: 'Upload Artifact'
         uses: 'actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02' # ratchet:actions/upload-artifact@v4
         with:
-          name: 'gemini-${{ steps.package-win.outputs.asset || steps.package.outputs.asset }}'
+          name: '${{ steps.package-win.outputs.asset || steps.package.outputs.asset }}'
           path: '${{ runner.temp }}/${{ steps.package-win.outputs.asset || steps.package.outputs.asset }}'
           retention-days: 7
           if-no-files-found: 'error'
@@ -207,7 +213,7 @@ jobs:
 
           $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
           $platform = '${{ matrix.platform_name }}'
-          $archive = "gemini-cli-bundle-$platform-$version.tgz"
+          $archive = "gemini-cli-leo-bundle-$platform-$version.tgz"
           $dest = Join-Path $env:RUNNER_TEMP $archive
 
           # Pack bundle-single/ as an installable tarball. `npm run bundle:single`
@@ -250,7 +256,7 @@ jobs:
           npm install -g --prefix $prefix $dest --loglevel=warn
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-          $installed = Join-Path $prefix 'node_modules/@leo-je/gemini-cli'
+          $installed = Join-Path $prefix 'node_modules/gemini-cli-leo'
           if (-not (Test-Path (Join-Path $installed 'gemini.mjs'))) {
             throw "Installing $archive did not place the entry under $installed"
           }
@@ -301,7 +307,7 @@ jobs:
 
           VERSION=$(node -p "require('./package.json').version")
           PLATFORM="${{ matrix.platform_name }}"
-          ARCHIVE="gemini-cli-bundle-$PLATFORM-$VERSION.tgz"
+          ARCHIVE="gemini-cli-leo-bundle-$PLATFORM-$VERSION.tgz"
 
           # Pack bundle-single/ as an installable tarball. `npm run bundle:single`
           # writes a package.json into it, which gives the package a name and a
@@ -337,7 +343,7 @@ jobs:
           mkdir -p "$PREFIX"
           npm install -g --prefix "$PREFIX" "$RUNNER_TEMP/$ARCHIVE" --loglevel=warn
 
-          INSTALLED="$PREFIX/lib/node_modules/@leo-je/gemini-cli"
+          INSTALLED="$PREFIX/lib/node_modules/gemini-cli-leo"
           test -f "$INSTALLED/gemini.mjs"
           test -d "$INSTALLED/node_modules/yoga-layout"
           test -x "$PREFIX/bin/gemini-leo"
@@ -378,7 +384,7 @@ jobs:
       - name: 'Upload Artifact'
         uses: 'actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02' # ratchet:actions/upload-artifact@v4
         with:
-          name: 'gemini-${{ steps.package-win.outputs.asset || steps.package.outputs.asset }}'
+          name: '${{ steps.package-win.outputs.asset || steps.package.outputs.asset }}'
           path: '${{ runner.temp }}/${{ steps.package-win.outputs.asset || steps.package.outputs.asset }}'
           retention-days: 7
           if-no-files-found: 'error'
@@ -401,7 +407,7 @@ jobs:
         with:
           path: 'downloads'
           merge-multiple: true
-          pattern: 'gemini-*'
+          pattern: 'gemini-cli-leo-*'
 
       - name: 'Create Release'
         env:
@@ -425,3 +431,66 @@ jobs:
               --title "Release ${TAG}" \
               --generate-notes
           fi
+
+  publish-npm:
+    name: 'Publish to npm'
+    # Publishing is the one step a re-run cannot undo — npm refuses to overwrite
+    # a version. It therefore runs last, after every platform has built and the
+    # GitHub release exists.
+    needs: ['bundle', 'release']
+    runs-on: 'ubuntu-latest'
+
+    steps:
+      - name: 'Checkout'
+        uses: 'actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8' # ratchet:actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: 'Set up Node.js'
+        uses: 'actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020' # ratchet:actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+          # Writes the registry into .npmrc; NODE_AUTH_TOKEN below supplies the
+          # credential for it.
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: 'Download the bundle tarball'
+        uses: 'actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0' # ratchet:actions/download-artifact@v5
+        with:
+          path: 'downloads'
+          merge-multiple: true
+          # The bundle's JavaScript is platform-neutral and no native binaries are
+          # staged into it, so one platform's tarball is the package for all of
+          # them. Taking the linux-x64 entry keeps the choice deterministic.
+          pattern: 'gemini-cli-leo-bundle-linux-x64-*'
+
+      - name: 'Publish'
+        env:
+          NODE_AUTH_TOKEN: '${{ secrets.NPM_TOKEN }}'
+        run: |
+          set -euo pipefail
+
+          TARBALL=$(find downloads -maxdepth 1 -name '*.tgz' | head -1)
+          if [ -z "$TARBALL" ]; then
+            echo "No bundle tarball was downloaded." >&2
+            exit 1
+          fi
+
+          # Read the manifest out of the tarball rather than package.json: the
+          # archive is what gets published, and npm takes the name and version
+          # from inside it.
+          MANIFEST=$(tar -xzOf "$TARBALL" package/package.json)
+          NAME=$(printf '%s' "$MANIFEST" | node -p "JSON.parse(require('fs').readFileSync(0, 'utf8')).name")
+          VERSION=$(printf '%s' "$MANIFEST" | node -p "JSON.parse(require('fs').readFileSync(0, 'utf8')).version")
+
+          echo "Publishing ${NAME}@${VERSION} from ${TARBALL}"
+
+          # Re-pushing a release branch must not fail the workflow: an npm
+          # version is permanent, so an existing one is simply left alone.
+          if npm view "${NAME}@${VERSION}" version >/dev/null 2>&1; then
+            echo "${NAME}@${VERSION} is already on the registry; nothing to do."
+            exit 0
+          fi
+
+          npm publish "$TARBALL" --access public
+          echo "Published ${NAME}@${VERSION}"

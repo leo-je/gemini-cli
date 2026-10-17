@@ -22,7 +22,9 @@ describe('createBundlePackageJson', () => {
   it('names the package so it cannot shadow the upstream global install', () => {
     const pkg = createBundlePackageJson(rootPkg, { entry: 'gemini.js' });
     expect(pkg.name).toBe(BUNDLE_PACKAGE_NAME);
-    expect(pkg.name).toBe('@leo-je/gemini-cli');
+    // Pinned literally: this is the name the release workflow publishes, so a
+    // change here would quietly publish under a different package.
+    expect(pkg.name).toBe('gemini-cli-leo');
   });
 
   it('uses the repository version', () => {

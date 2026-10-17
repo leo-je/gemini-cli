@@ -71,7 +71,7 @@ inlined into JavaScript. They are loaded at runtime with a dynamic `require`, so
 
 Both builds write a `package.json` next to the entry point, so the bundle is a
 package you install rather than a directory you wire up by hand. The manifest
-names the package `@leo-je/gemini-cli`, declares `"type": "module"` (the split
+names the package `gemini-cli-leo`, declares `"type": "module"` (the split
 build's entry is a `.js` file, which Node would otherwise treat as CommonJS),
 and points its `gemini-leo` bin at the entry file.
 
@@ -79,7 +79,15 @@ Releases from this fork publish the bundle as a `.tgz` so it installs with a
 single command:
 
 ```bash
-npm install -g gemini-cli-bundle-<platform>-<version>.tgz
+npm install -g gemini-cli-leo-bundle-<platform>-<version>.tgz
+gemini-leo --version
+```
+
+The release workflow also publishes the same tarball to the public registry, so
+the archive itself is optional:
+
+```bash
+npm install -g gemini-cli-leo
 gemini-leo --version
 ```
 
@@ -101,8 +109,8 @@ Neither resolves dependencies, which matters here for two reasons:
 `.zip` it treats the path as a directory and fails on the missing
 `package.json`. That is why the release assets are `.tgz`.
 
-The package is scoped to `@leo-je/gemini-cli` rather than `@google/gemini-cli`
-on purpose. Installing under the published name would replace an existing global
+The package is named `gemini-cli-leo` rather than `@google/gemini-cli` on
+purpose. Installing under the published name would replace an existing global
 install of Gemini CLI instead of sitting beside it.
 
 Released archives carry no `node_modules`. Staging the build machine's
