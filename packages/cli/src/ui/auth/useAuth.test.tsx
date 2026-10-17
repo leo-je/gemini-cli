@@ -207,6 +207,27 @@ describe('useAuth', () => {
       expect(result.current.authState).toBe(AuthState.Authenticated);
     });
 
+    it('should authenticate with a configured provider even when no mode is recorded', async () => {
+      // The setup step that collects a provider never goes through the auth
+      // dialog, so a start can find the mode unset while a complete endpoint
+      // exists. Asking which mode to use there sent the user back to the mode
+      // picker after they had already configured everything.
+      mockValidateAuthMethod.mockResolvedValue(null);
+      mockIsOpenAiEndpointConfigured.mockReturnValue(true);
+
+      const { result } = await renderHook(() =>
+        useAuthCommand(createSettings(undefined), mockConfig),
+      );
+
+      expect(mockConfig.refreshAuth).toHaveBeenCalledWith(AuthType.USE_OPENAI);
+      expect(result.current.authError).toBeNull();
+
+      await act(async () => {
+        deferredRefreshAuth.resolve();
+      });
+      expect(result.current.authState).toBe(AuthState.Authenticated);
+    });
+
     it('should collect the endpoint when OpenAI mode has none configured', async () => {
       process.env['GEMINI_API_TYPE'] = 'openai';
       mockIsOpenAiEndpointConfigured.mockReturnValue(false);

@@ -8,10 +8,11 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { getOpenAiProvidersPath } from '@google/gemini-cli-core';
+import { AuthType, getOpenAiProvidersPath } from '@google/gemini-cli-core';
 import { SettingScope } from '../../config/settings.js';
 import {
   OPENAI_PROVIDER_SETTING_KEY,
+  persistOpenAiMode,
   persistProviderId,
   providerHasDefaultModel,
   readPersistedProviderId,
@@ -46,6 +47,32 @@ describe('readPersistedProviderId', () => {
         security: { auth: { openAiProviderId: '   ' } },
       }),
     ).toBeUndefined();
+  });
+});
+
+describe('persistOpenAiMode', () => {
+  it('records OpenAI as the chosen auth mode', () => {
+    // The setup step replaces the auth dialog, which is what normally writes
+    // this key; without it the next start asked which mode to use.
+    const settings = { setValue: vi.fn() };
+
+    persistOpenAiMode(settings);
+
+    expect(settings.setValue).toHaveBeenCalledWith(
+      SettingScope.User,
+      'security.auth.selectedType',
+      AuthType.USE_OPENAI,
+    );
+  });
+
+  it('does not fail the switch when settings cannot be written', () => {
+    const settings = {
+      setValue: vi.fn(() => {
+        throw new Error('read-only');
+      }),
+    };
+
+    expect(() => persistOpenAiMode(settings)).not.toThrow();
   });
 });
 

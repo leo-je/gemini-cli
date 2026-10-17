@@ -13,11 +13,16 @@ import { type QuotaState } from '../contexts/QuotaContext.js';
 import { type RestartReason } from '../hooks/useIdeTrustListener.js';
 import { type IdeInfo } from '@google/gemini-cli-core';
 import { hasOpenAiBaseUrl } from '../../config/auth.js';
+import { hasConfiguredProviders } from '../openai/index.js';
 
 // Mock child components
-vi.mock('../openai/AddProviderDialog.js', () => ({
-  AddProviderDialog: () => <Text>AddProviderDialog</Text>,
+vi.mock('../openai/OpenAiSetupDialog.js', () => ({
+  OpenAiSetupDialog: () => <Text>OpenAiSetupDialog</Text>,
 }));
+vi.mock('../openai/index.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../openai/index.js')>();
+  return { ...actual, hasConfiguredProviders: vi.fn(() => false) };
+});
 vi.mock('../openai/OpenAiEndpointDialog.js', () => ({
   OpenAiEndpointDialog: () => <Text>OpenAiEndpointDialog</Text>,
 }));
@@ -75,10 +80,12 @@ vi.mock('./AgentConfigDialog.js', () => ({
 }));
 
 const mockedHasOpenAiBaseUrl = vi.mocked(hasOpenAiBaseUrl);
+const mockedHasConfiguredProviders = vi.mocked(hasConfiguredProviders);
 
 describe('DialogManager', () => {
   beforeEach(() => {
     mockedHasOpenAiBaseUrl.mockReturnValue(false);
+    mockedHasConfiguredProviders.mockReturnValue(false);
   });
 
   const defaultProps = {
@@ -197,8 +204,9 @@ describe('DialogManager', () => {
     ],
   ];
 
-  it('offers the provider form when a first run has nothing configured', async () => {
+  it('starts the setup step when a first run has nothing configured', async () => {
     mockedHasOpenAiBaseUrl.mockReturnValue(false);
+    mockedHasConfiguredProviders.mockReturnValue(false);
     const { lastFrame, unmount } = await renderWithProviders(
       <DialogManager {...defaultProps} />,
       {
@@ -208,7 +216,26 @@ describe('DialogManager', () => {
         } as Partial<UIState> as UIState,
       },
     );
-    expect(lastFrame()).toContain('AddProviderDialog');
+    expect(lastFrame()).toContain('OpenAiSetupDialog');
+    expect(lastFrame()).not.toContain('OpenAiEndpointDialog');
+    unmount();
+  });
+
+  it('asks which provider to use when some are already configured', async () => {
+    // The single-endpoint form is only right when there is no provider file to
+    // choose from; an existing profile is the more specific answer.
+    mockedHasOpenAiBaseUrl.mockReturnValue(true);
+    mockedHasConfiguredProviders.mockReturnValue(true);
+    const { lastFrame, unmount } = await renderWithProviders(
+      <DialogManager {...defaultProps} />,
+      {
+        uiState: {
+          ...baseUiState,
+          isAwaitingOpenAiEndpoint: true,
+        } as Partial<UIState> as UIState,
+      },
+    );
+    expect(lastFrame()).toContain('OpenAiSetupDialog');
     expect(lastFrame()).not.toContain('OpenAiEndpointDialog');
     unmount();
   });
@@ -227,7 +254,7 @@ describe('DialogManager', () => {
       },
     );
     expect(lastFrame()).toContain('OpenAiEndpointDialog');
-    expect(lastFrame()).not.toContain('AddProviderDialog');
+    expect(lastFrame()).not.toContain('OpenAiSetupDialog');
     unmount();
   });
 

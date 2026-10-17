@@ -22,6 +22,7 @@ export {
   type OpenAiEndpointEnv,
 } from './openAiEndpointEnv.js';
 export { OpenAiEndpointDialog } from './OpenAiEndpointDialog.js';
+export { OpenAiSetupDialog } from './OpenAiSetupDialog.js';
 export {
   fetchRemoteModels,
   isOpenAiBackend,
@@ -35,8 +36,10 @@ export {
 } from './AddProviderDialog.js';
 export { addOpenAiProvider, apiKeyEnvName } from './addProvider.js';
 export {
+  persistOpenAiMode,
   persistProviderId,
   providerHasDefaultModel,
+  hasConfiguredProviders,
   readPersistedProviderId,
   rememberModelForProvider,
   type ProviderPreferenceWriter,

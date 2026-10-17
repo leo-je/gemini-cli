@@ -15,7 +15,11 @@ import { AuthInProgress } from '../auth/AuthInProgress.js';
 import { AuthDialog } from '../auth/AuthDialog.js';
 import { BannedAccountDialog } from '../auth/BannedAccountDialog.js';
 import { ApiAuthDialog } from '../auth/ApiAuthDialog.js';
-import { AddProviderDialog, OpenAiEndpointDialog } from '../openai/index.js';
+import {
+  hasConfiguredProviders,
+  OpenAiEndpointDialog,
+  OpenAiSetupDialog,
+} from '../openai/index.js';
 import { hasOpenAiBaseUrl } from '../../config/auth.js';
 import { ProviderDialogs } from '../openai/ProviderDialogs.js';
 import { EditorSettingsDialog } from './EditorSettingsDialog.js';
@@ -338,15 +342,16 @@ export const DialogManager = ({
     // model per provider.
     return (
       <Box flexDirection="column">
-        {hasOpenAiBaseUrl() ? (
+        {!hasConfiguredProviders() && hasOpenAiBaseUrl() ? (
           <OpenAiEndpointDialog
             onSubmit={uiActions.handleOpenAiEndpointSubmit}
             onCancel={uiActions.handleOpenAiEndpointCancel}
             error={uiState.authError}
           />
         ) : (
-          <AddProviderDialog
+          <OpenAiSetupDialog
             onSubmit={uiActions.handleOpenAiProviderSubmit}
+            onPick={uiActions.handleOpenAiProviderPick}
             onCancel={uiActions.handleOpenAiEndpointCancel}
             error={uiState.authError}
           />

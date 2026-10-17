@@ -44,6 +44,25 @@ export async function validateAuthMethodWithSettings(
 
 import type { AccountSuspensionInfo } from '../contexts/UIStateContext.js';
 
+/**
+ * The auth type a start should use when the settings do not name one.
+ *
+ * `security.auth.selectedType` is normally written by the auth dialog, but the
+ * OpenAI setup step a first run goes through never passes through that dialog:
+ * it collects a provider profile instead. A start that then found the mode
+ * unset asked the user to choose a mode they had already chosen, after they had
+ * built a complete endpoint. A fully configured OpenAI setup is an explicit
+ * choice of its own, so it decides the mode here.
+ */
+function resolveStartupAuthType(
+  configuredAuthType: AuthType | undefined,
+): AuthType | undefined {
+  if (configuredAuthType) {
+    return configuredAuthType;
+  }
+  return isOpenAiEndpointConfigured() ? AuthType.USE_OPENAI : undefined;
+}
+
 export const useAuthCommand = (
   settings: LoadedSettings,
   config: Config,
@@ -100,8 +119,8 @@ export const useAuthCommand = (
       // Only an explicit choice authenticates here. An ambient GEMINI_API_KEY
       // is a reason to nudge the user toward the dialog, not to sign in for
       // them; the GEMINI_API_TYPE switch, by contrast, is a direct instruction.
-      const authType = getExplicitAuthType(
-        settings.merged.security.auth.selectedType,
+      const authType = resolveStartupAuthType(
+        getExplicitAuthType(settings.merged.security.auth.selectedType),
       );
       if (!authType) {
         if (process.env['GEMINI_API_KEY']) {

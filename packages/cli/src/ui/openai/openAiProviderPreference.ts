@@ -30,12 +30,16 @@ import {
   type MergedSettings,
 } from '../../config/settings.js';
 import {
+  AuthType,
   loadProviderEntries,
   persistProviderModelId,
 } from '@google/gemini-cli-core';
 
 /** The persisted provider choice, under `security.auth`. */
 export const OPENAI_PROVIDER_SETTING_KEY = 'security.auth.openAiProviderId';
+
+/** The persisted auth mode, next to the provider choice. */
+const AUTH_MODE_SETTING_KEY = 'security.auth.selectedType';
 
 /** The subset of settings this module reads; kept structural for tests. */
 export interface ProviderPreferenceSettings {
@@ -92,6 +96,27 @@ export function persistProviderId(
 }
 
 /**
+ * Records OpenAI mode as the chosen auth type.
+ *
+ * The auth dialog normally writes `security.auth.selectedType`, but the setup
+ * step a first run goes through replaces that dialog: it collects a provider
+ * profile without ever naming a mode. A start that then found nothing recorded
+ * asked which mode to use, which is how a user who had just built a complete
+ * endpoint was sent back to the mode picker on the next launch.
+ */
+export function persistOpenAiMode(settings: ProviderPreferenceWriter): void {
+  try {
+    settings.setValue(
+      SettingScope.User,
+      AUTH_MODE_SETTING_KEY,
+      AuthType.USE_OPENAI,
+    );
+  } catch {
+    // Ignored on purpose; see the doc comment on `persistProviderId`.
+  }
+}
+
+/**
  * Whether a provider declares a default model.
  *
  * A provider without one is supported by design — the session is meant to pick
@@ -104,6 +129,19 @@ export function persistProviderId(
  * cannot be found here means the file changed underneath the session, and
  * guessing "no default model" would open a list for the wrong reason.
  */
+/**
+ * Whether the provider file holds at least one entry, readable or not — an
+ * unreadable file is reported by the auth gate, and treating it as empty here
+ * would hide the picker behind a form the user did not ask for.
+ */
+export function hasConfiguredProviders(): boolean {
+  try {
+    return loadProviderEntries().length > 0;
+  } catch {
+    return false;
+  }
+}
+
 export function providerHasDefaultModel(providerId: string): boolean {
   try {
     const entry = loadProviderEntries().find(

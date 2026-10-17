@@ -107,6 +107,7 @@ import { useProviderDialogHandlers } from './openai/useProviderDialogHandlers.js
 import {
   addOpenAiProvider,
   applyOpenAiEndpointEnv,
+  persistOpenAiMode,
   persistProviderId,
   providerHasDefaultModel,
   type NewProviderValues,
@@ -1170,31 +1171,42 @@ Logging in with Google... Restarting Gemini CLI to continue.
   } = useModelCommand();
 
   /**
+   * Points the session at a provider and finishes authentication against it.
+   *
+   * OpenAI mode is established by `refreshAuth` rather than by
+   * `switchOpenAiProvider`: the auth flow runs while the session is still in
+   * whatever mode it started in, and the switch refuses to run outside OpenAI
+   * mode. Recording the id first is what `refreshAuth` resolves.
+   */
+  const activateOpenAiProvider = useCallback(
+    async (providerId: string) => {
+      config.setActiveOpenAiProvider(providerId);
+      await config.refreshAuth(AuthType.USE_OPENAI);
+      persistProviderId(settings, providerId);
+      // The setup step replaces the auth dialog, which is what normally
+      // records the mode. Write it here too, or the next start has no mode to
+      // go on and asks the user to pick one they already picked.
+      persistOpenAiMode(settings);
+      setAuthState(AuthState.Authenticated);
+    },
+    [config, settings, setAuthState],
+  );
+
+  /**
    * The first-run counterpart of `handleOpenAiEndpointSubmit`: with nothing
    * configured, the auth dialog offers a provider profile instead of the
    * single-endpoint environment form, so the result is durable and every
    * provider keeps its own model.
-   *
-   * OpenAI mode is established before the switch rather than through it: the
-   * auth flow runs while the session is still in whatever mode it started in,
-   * and `switchOpenAiProvider` refuses to run outside OpenAI mode — which sent
-   * the user back to the mode picker with "Failed to add the provider".
-   * Recording the profile as the session's choice first makes `refreshAuth`
-   * resolve it directly.
    */
   const handleOpenAiProviderSubmit = useCallback(
     async (values: NewProviderValues) => {
       try {
         onAuthError(null);
         addOpenAiProvider(values);
-        config.setActiveOpenAiProvider(values.id);
-        await config.refreshAuth(AuthType.USE_OPENAI);
-        persistProviderId(settings, values.id);
-        setAuthState(AuthState.Authenticated);
-        // A profile may legitimately have no model — it is meant to pick one
-        // from the endpoint's catalog. Nothing did, though, so the next message
-        // failed. Open the list here; choosing writes the model back into the
-        // profile, which also satisfies the auth gate on later starts.
+        await activateOpenAiProvider(values.id);
+        // The form's model field is optional, and an endpoint without one
+        // cannot send anything. Open the list here; choosing writes the model
+        // back into the profile, which also satisfies the auth gate later.
         if (!providerHasDefaultModel(values.id)) {
           openModelDialog(config.getContentGeneratorConfig()?.baseUrl);
         }
@@ -1206,7 +1218,29 @@ Logging in with Google... Restarting Gemini CLI to continue.
         );
       }
     },
-    [setAuthState, onAuthError, config, settings, openModelDialog],
+    [onAuthError, activateOpenAiProvider, config, openModelDialog],
+  );
+
+  /**
+   * Entering OpenAI mode with providers already configured asks which one to
+   * use, then which of its models — the choice is the point, so the model list
+   * opens even when the profile has a default.
+   */
+  const handleOpenAiProviderPick = useCallback(
+    async (providerId: string) => {
+      try {
+        onAuthError(null);
+        await activateOpenAiProvider(providerId);
+        openModelDialog(config.getContentGeneratorConfig()?.baseUrl);
+      } catch (e) {
+        onAuthError(
+          `Failed to use provider "${providerId}": ${
+            e instanceof Error ? e.message : String(e)
+          }`,
+        );
+      }
+    },
+    [onAuthError, activateOpenAiProvider, config, openModelDialog],
   );
 
   const {
@@ -3151,6 +3185,7 @@ Logging in with Google... Restarting Gemini CLI to continue.
       handleOpenAiEndpointSubmit,
       handleOpenAiEndpointCancel,
       handleOpenAiProviderSubmit,
+      handleOpenAiProviderPick,
       setBannerVisible,
       setShortcutsHelpVisible,
       setCleanUiDetailsVisible,
@@ -3261,6 +3296,7 @@ Logging in with Google... Restarting Gemini CLI to continue.
       handleOpenAiEndpointSubmit,
       handleOpenAiEndpointCancel,
       handleOpenAiProviderSubmit,
+      handleOpenAiProviderPick,
       setBannerVisible,
       setShortcutsHelpVisible,
       setCleanUiDetailsVisible,
