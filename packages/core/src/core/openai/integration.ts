@@ -35,6 +35,7 @@ import {
   resolveProviderFromEnv,
   type OpenAiProviderProfile,
 } from './providers.js';
+import { buildOpencodeDisguiseHeaders } from './opencode/headers.js';
 import {
   OPENAI_API_KEY_ENV,
   OPENAI_API_KEY_FALLBACK_ENV,
@@ -110,6 +111,22 @@ export function applyProviderToContentGeneratorConfig(options: {
     contentGeneratorConfig.customHeaders = {
       ...provider.headers,
       ...customHeaders,
+    };
+  }
+  // OpenCode-compatible endpoints gate on the client identity rather than on
+  // the credential, so the disguise sits at the *bottom* of the precedence
+  // chain: provider headers above, and any caller-supplied header, still win.
+  // Skipped when the session has no id — a fresh random session per request
+  // would defeat the endpoint's cache affinity, which keys off this value.
+  const opencodeSessionId = config?.getSessionId?.();
+  if (config?.getOpenAiOpencodeHeaders?.() && opencodeSessionId) {
+    contentGeneratorConfig.customHeaders = {
+      ...buildOpencodeDisguiseHeaders({ sessionSignal: opencodeSessionId }),
+      // The caller's headers (session-scoped override) still win, including the
+      // case where no provider profile was resolved and the block above did not
+      // merge them in.
+      ...customHeaders,
+      ...contentGeneratorConfig.customHeaders,
     };
   }
   contentGeneratorConfig.modelId = provider?.modelId;

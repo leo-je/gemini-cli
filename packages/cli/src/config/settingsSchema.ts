@@ -1998,6 +1998,20 @@ const SETTINGS_SCHEMA = {
               "The OpenAI-compatible provider this session should use, as configured by `/provider`. Values are the provider ids from `~/.gemini/openai-providers.json`; an id that no longer exists falls back to the file's first entry.",
             showInDialog: false,
           },
+          // Fork-owned key: opt-in OpenCode-compatible request headers for
+          // OpenAI-compatible endpoints that accept a credential but still gate
+          // on client identity. Off by default; see
+          // `core/openai/opencode/headers.ts` for what is sent and why.
+          openAiOpencodeHeaders: {
+            type: 'boolean',
+            label: 'OpenCode Request Headers',
+            category: 'Security',
+            requiresRestart: true,
+            default: false,
+            description:
+              'Adapt OpenAI-compatible requests to look like they came from the OpenCode CLI: client-identity headers plus the tool names some free endpoints require. Only enable this when the endpoint rejects requests that do not look like they came from the OpenCode CLI; some providers issue a key that is only accepted with the disguise in place. Requires a restart.',
+            showInDialog: true,
+          },
           enforcedType: {
             type: 'string',
             label: 'Enforced Auth Type',

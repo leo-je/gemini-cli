@@ -44,6 +44,7 @@ function makeGenerator(
   env: Record<string, string> = {},
   configOverrides: Partial<ContentGeneratorConfig> = {},
   activeModel?: string,
+  opencodeHeaders = false,
 ): OpenAIContentGenerator {
   const config: ContentGeneratorConfig = {
     authType: AuthType.USE_OPENAI,
@@ -56,6 +57,7 @@ function makeGenerator(
   const gcConfig = {
     env,
     getActiveModel: () => activeModel ?? env['GEMINI_MODEL'] ?? 'gemini-3-pro',
+    getOpenAiOpencodeHeaders: () => opencodeHeaders,
     get model() {
       return activeModel ?? env['GEMINI_MODEL'] ?? 'gemini-3-pro';
     },
@@ -195,6 +197,100 @@ describe('OpenAIContentGenerator', () => {
     expect((init.headers as Record<string, string>)['Authorization']).toBe(
       'Bearer test-key',
     );
+  });
+
+  it('adds the OpenCode free-lane tools only when the disguise is enabled', async () => {
+    // The Zen free lane admits a request only when the body carries `bash` and
+    // `read`; the header disguise alone still answers 403. Both directions are
+    // asserted because the placeholders must not leak into normal endpoints.
+    // Each request needs its own stream: a Response body can only be read once.
+    const fetchMock = vi.fn().mockImplementation(async () =>
+      sseResponse([
+        dataFrame({
+          choices: [{ delta: { content: 'hi' }, finish_reason: 'stop' }],
+        }),
+        'data: [DONE]\n\n',
+      ]),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const request = {
+      ...baseRequest,
+      config: {
+        tools: [{ functionDeclarations: [{ name: 'run_shell_command' }] }],
+      },
+    } as unknown as Parameters<
+      OpenAIContentGenerator['generateContentStream']
+    >[0];
+
+    const enabled = makeGenerator(
+      { GEMINI_OPENAI_MODELID: 'free-model' },
+      {},
+      undefined,
+      true,
+    );
+    await collectChunks(
+      await enabled.generateContentStream(request, 'p', LlmRole.MAIN),
+    );
+    const [, enabledInit] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const enabledNames = (
+      JSON.parse(enabledInit.body as string).tools as Array<{
+        function: { name: string };
+      }>
+    ).map((entry) => entry.function.name);
+    expect(enabledNames).toEqual(
+      expect.arrayContaining(['run_shell_command', 'bash', 'read']),
+    );
+
+    const disabled = makeGenerator(
+      { GEMINI_OPENAI_MODELID: 'free-model' },
+      {},
+      undefined,
+      false,
+    );
+    await collectChunks(
+      await disabled.generateContentStream(request, 'p', LlmRole.MAIN),
+    );
+    const [, disabledInit] = fetchMock.mock.calls[1] as [string, RequestInit];
+    expect(
+      (
+        JSON.parse(disabledInit.body as string).tools as Array<{
+          function: { name: string };
+        }>
+      ).map((entry) => entry.function.name),
+    ).toEqual(['run_shell_command']);
+  });
+
+  it('adds the free-lane tools to non-streaming calls too', async () => {
+    // Same helper on the non-streaming path, so the shape does not depend on
+    // which entry point a caller used.
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({
+        choices: [
+          {
+            message: { role: 'assistant', content: 'hi' },
+            finish_reason: 'stop',
+          },
+        ],
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const generator = makeGenerator(
+      { GEMINI_OPENAI_MODELID: 'free-model' },
+      {},
+      undefined,
+      true,
+    );
+    await generator.generateContent(baseRequest, 'p', LlmRole.MAIN);
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const names = (
+      JSON.parse(init.body as string).tools as Array<{
+        function: { name: string };
+      }>
+    ).map((entry) => entry.function.name);
+    expect(names).toEqual(['bash', 'read']);
   });
 
   it('honors the CLI selection over the configured env id', async () => {

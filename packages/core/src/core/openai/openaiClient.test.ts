@@ -14,6 +14,14 @@ import {
   resolveEndpointUrl,
 } from './openaiClient.js';
 
+// The client routes proxied requests through `undici.fetch` instead of the
+// platform `fetch`, so the proxy tests have to intercept that copy.
+const { undiciFetchMock } = vi.hoisted(() => ({ undiciFetchMock: vi.fn() }));
+vi.mock('undici', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('undici')>();
+  return { ...actual, fetch: undiciFetchMock };
+});
+
 function byteStream(chunks: string[]): ReadableStream<Uint8Array> {
   const encoder = new TextEncoder();
   return new ReadableStream<Uint8Array>({
@@ -126,6 +134,7 @@ describe('parseSseStream', () => {
 describe('OpenAICompatibleClient', () => {
   afterEach(() => {
     vi.unstubAllGlobals();
+    vi.clearAllMocks();
   });
 
   it('requires a base URL', () => {
@@ -191,13 +200,16 @@ describe('OpenAICompatibleClient', () => {
     ).toBeUndefined();
   });
 
-  it('applies the proxy to a remote endpoint', async () => {
-    const fetchMock = vi
+  it('applies the proxy to a remote endpoint through undici fetch', async () => {
+    const globalFetchMock = vi
       .fn()
       .mockResolvedValue(
         new Response(JSON.stringify({ choices: [] }), { status: 200 }),
       );
-    vi.stubGlobal('fetch', fetchMock);
+    vi.stubGlobal('fetch', globalFetchMock);
+    undiciFetchMock.mockResolvedValue(
+      new Response(JSON.stringify({ choices: [] }), { status: 200 }),
+    );
 
     await new OpenAICompatibleClient({
       baseUrl: 'https://api.openai.com/v1',
@@ -205,8 +217,13 @@ describe('OpenAICompatibleClient', () => {
       proxy: 'http://127.0.0.1:7890',
     }).chatCompletion({ model: 'm', messages: [] });
 
+    // A dispatcher from the packaged undici must not be handed to the platform
+    // fetch: the two copies do not share their request symbols, which surfaced
+    // as a garbled 200 body (or `TypeError: fetch failed`) behind ClashX.
+    expect(globalFetchMock).not.toHaveBeenCalled();
+    expect(undiciFetchMock).toHaveBeenCalledTimes(1);
     expect(
-      (fetchMock.mock.calls[0][1] as { dispatcher?: unknown }).dispatcher,
+      (undiciFetchMock.mock.calls[0][1] as { dispatcher?: unknown }).dispatcher,
     ).toBeDefined();
   });
 

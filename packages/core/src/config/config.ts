@@ -661,6 +661,11 @@ export interface ConfigParameters {
   // back to the provider file's first entry. See
   // `core/openai/integration.ts`.
   openAiProviderId?: string;
+  // Fork-owned: send OpenCode-compatible request headers on OpenAI-compatible
+  // requests, read from `security.auth.openAiOpencodeHeaders` by the CLI. The
+  // request layer is rebuilt on `refreshAuth`, so a change needs a restart.
+  // See `core/openai/opencode/headers.ts`.
+  openAiOpencodeHeaders?: boolean;
   disableLoopDetection?: boolean;
   maxSessionTurns?: number;
   acpMode?: boolean;
@@ -797,6 +802,8 @@ export class Config implements McpContext, AgentLoopContext {
   private contentGenerator!: ContentGenerator;
   /** Set by `/provider`; read when building the OpenAI content generator. */
   private activeOpenAiProviderId?: string;
+  /** Opt-in OpenCode request headers; read by the OpenAI content generator. */
+  private readonly openAiOpencodeHeaders: boolean;
   readonly modelConfigService: ModelConfigService;
   private readonly embeddingModel: string;
   private readonly sandbox: SandboxConfig | undefined;
@@ -1455,6 +1462,7 @@ export class Config implements McpContext, AgentLoopContext {
     // `security.auth.openAiProviderId` by the CLI. Kept last so it runs through
     // the normalising setter only once the rest of the Config exists.
     this.setActiveOpenAiProvider(params.openAiProviderId);
+    this.openAiOpencodeHeaders = params.openAiOpencodeHeaders === true;
   }
 
   isInitialized(): boolean {
@@ -1971,6 +1979,18 @@ export class Config implements McpContext, AgentLoopContext {
    */
   getActiveOpenAiProviderId(): string | undefined {
     return this.activeOpenAiProviderId;
+  }
+
+  /**
+   * Whether OpenAI-compatible requests should carry OpenCode's client headers.
+   *
+   * Set once at construction from `security.auth.openAiOpencodeHeaders`. The
+   * request layer is built when the content generator is created and rebuilt on
+   * `refreshAuth`, so toggling the setting takes effect on the next start —
+   * which is what the setting's `requiresRestart` promises.
+   */
+  getOpenAiOpencodeHeaders(): boolean {
+    return this.openAiOpencodeHeaders;
   }
 
   setActiveOpenAiProvider(providerId: string | undefined): void {

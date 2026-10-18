@@ -57,6 +57,7 @@ import {
   readEnvWithFallback,
 } from './constants.js';
 import { isAutoModel } from '../../config/models.js';
+import { ensureOpencodeFreeLaneShape } from './opencode/body.js';
 
 /**
  * Whether a model string is a Gemini name the endpoint will not recognize.
@@ -165,6 +166,10 @@ export class OpenAIContentGenerator implements ContentGenerator {
   ): Promise<GenerateContentResponse> {
     const modelId = this.resolveModelId();
     const body = toOpenAIRequest(request, modelId, false);
+    if (this.gcConfig.getOpenAiOpencodeHeaders?.()) {
+      // The free lane checks for agent-shaped tools; see opencode/body.ts.
+      ensureOpencodeFreeLaneShape(body);
+    }
     const completion = await this.client.chatCompletion(
       body,
       request.config?.abortSignal,
@@ -185,6 +190,10 @@ export class OpenAIContentGenerator implements ContentGenerator {
   ): Promise<AsyncGenerator<GenerateContentResponse>> {
     const modelId = this.resolveModelId();
     const body = toOpenAIRequest(request, modelId, true);
+    if (this.gcConfig.getOpenAiOpencodeHeaders?.()) {
+      // The free lane checks for agent-shaped tools; see opencode/body.ts.
+      ensureOpencodeFreeLaneShape(body);
+    }
     // Issued eagerly so connection failures surface inside the caller's retry
     // loop rather than during iteration.
     const pending = await this.client.startChatCompletionStream(

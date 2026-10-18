@@ -977,6 +977,10 @@ export async function loadCliConfig(
     // `/provider` switches. An id that no longer exists degrades to the first
     // entry with a warning (see core/openai/integration.ts).
     openAiProviderId: settings.security?.auth?.openAiProviderId,
+    // Fork-owned: opt-in OpenCode-compatible request headers for
+    // OpenAI-compatible endpoints that gate on client identity. Off by default;
+    // see core/openai/opencode/headers.ts.
+    openAiOpencodeHeaders: settings.security?.auth?.openAiOpencodeHeaders,
     targetDir: cwd,
     includeDirectoryTree,
     includeDirectories,
