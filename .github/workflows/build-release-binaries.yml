@@ -470,11 +470,40 @@ jobs:
         run: |
           set -euo pipefail
 
+          REGISTRY="https://registry.npmjs.org"
+
+          # Same rule as the other repos: an unconfigured token skips the
+          # publish instead of reddening the run, because the release itself is
+          # already done by this point. Passing --registry rather than trusting
+          # .npmrc keeps that true even if the repository ever gains one.
+          if [ -z "${NODE_AUTH_TOKEN:-}" ]; then
+            echo "::warning::NPM_TOKEN is not configured; skipping the npm publish."
+            {
+              echo "### npm publish skipped"
+              echo ""
+              echo "\`NPM_TOKEN\` is not configured. Add an npm access token with"
+              echo "publish rights under Settings -> Secrets and variables -> Actions,"
+              echo "then re-run this job."
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          # Proves the token authenticates before anything is uploaded.
+          npm whoami --registry="$REGISTRY"
+
           TARBALL=$(find downloads -maxdepth 1 -name '*.tgz' | head -1)
           if [ -z "$TARBALL" ]; then
             echo "No bundle tarball was downloaded." >&2
             exit 1
           fi
+
+          # npm reads a bare path as a hosted git spec (it ran
+          # `git ls-remote ssh://git@github.com/downloads/....tgz.git`), so the
+          # tarball has to be spelled as a local file.
+          case "$TARBALL" in
+            /*) ;;
+            *) TARBALL="./$TARBALL" ;;
+          esac
 
           # Read the manifest out of the tarball rather than package.json: the
           # archive is what gets published, and npm takes the name and version
@@ -487,7 +516,7 @@ jobs:
 
           # Re-pushing a release branch must not fail the workflow: an npm
           # version is permanent, so an existing one is simply left alone.
-          if npm view "${NAME}@${VERSION}" version >/dev/null 2>&1; then
+          if npm view "${NAME}@${VERSION}" version --registry="$REGISTRY" >/dev/null 2>&1; then
             echo "${NAME}@${VERSION} is already on the registry; nothing to do."
             exit 0
           fi
@@ -496,5 +525,5 @@ jobs:
           # npm refuses to publish one without an explicit tag. `latest` is the
           # right default here: `npm install -g gemini-cli-leo` should get the
           # newest release without the user having to know a tag name.
-          npm publish "$TARBALL" --access public --tag latest
+          npm publish "$TARBALL" --access public --tag latest --registry="$REGISTRY"
           echo "Published ${NAME}@${VERSION}"
