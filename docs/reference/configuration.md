@@ -2018,11 +2018,11 @@ their corresponding top-level category object in your `settings.json` file.
 
 - **`security.auth.openAiOpencodeHeaders`** (boolean):
 
-  - **Description:** Send OpenCode-compatible request headers on
-    OpenAI-compatible requests. Only enable this when the endpoint rejects
-    requests that do not look like they came from the OpenCode CLI; some
-    providers issue a key that is only accepted with the disguise in place.
-    Requires a restart.
+  - **Description:** Adapt OpenAI-compatible requests to look like they came
+    from the OpenCode CLI: client-identity headers plus the tool names some free
+    endpoints require. Only enable this when the endpoint rejects requests that
+    do not look like they came from the OpenCode CLI; some providers issue a key
+    that is only accepted with the disguise in place. Requires a restart.
   - **Default:** `false`
   - **Requires restart:** Yes
 

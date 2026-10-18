@@ -2009,7 +2009,7 @@ const SETTINGS_SCHEMA = {
             requiresRestart: true,
             default: false,
             description:
-              'Send OpenCode-compatible request headers on OpenAI-compatible requests. Only enable this when the endpoint rejects requests that do not look like they came from the OpenCode CLI; some providers issue a key that is only accepted with the disguise in place. Requires a restart.',
+              'Adapt OpenAI-compatible requests to look like they came from the OpenCode CLI: client-identity headers plus the tool names some free endpoints require. Only enable this when the endpoint rejects requests that do not look like they came from the OpenCode CLI; some providers issue a key that is only accepted with the disguise in place. Requires a restart.',
             showInDialog: true,
           },
           enforcedType: {

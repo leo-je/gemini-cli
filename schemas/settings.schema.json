@@ -3320,8 +3320,8 @@
             },
             "openAiOpencodeHeaders": {
               "title": "OpenCode Request Headers",
-              "description": "Send OpenCode-compatible request headers on OpenAI-compatible requests. Only enable this when the endpoint rejects requests that do not look like they came from the OpenCode CLI; some providers issue a key that is only accepted with the disguise in place. Requires a restart.",
-              "markdownDescription": "Send OpenCode-compatible request headers on OpenAI-compatible requests. Only enable this when the endpoint rejects requests that do not look like they came from the OpenCode CLI; some providers issue a key that is only accepted with the disguise in place. Requires a restart.\n\n- Category: `Security`\n- Requires restart: `yes`\n- Default: `false`",
+              "description": "Adapt OpenAI-compatible requests to look like they came from the OpenCode CLI: client-identity headers plus the tool names some free endpoints require. Only enable this when the endpoint rejects requests that do not look like they came from the OpenCode CLI; some providers issue a key that is only accepted with the disguise in place. Requires a restart.",
+              "markdownDescription": "Adapt OpenAI-compatible requests to look like they came from the OpenCode CLI: client-identity headers plus the tool names some free endpoints require. Only enable this when the endpoint rejects requests that do not look like they came from the OpenCode CLI; some providers issue a key that is only accepted with the disguise in place. Requires a restart.\n\n- Category: `Security`\n- Requires restart: `yes`\n- Default: `false`",
               "default": false,
               "type": "boolean"
             },
