@@ -36,12 +36,14 @@ those spots, the fix is to re-apply one line, not to re-derive the feature.
 
 Fork-added (owned by this fork):
 
-| File                  | Purpose                                                                                                                                                                                                    |
-| :-------------------- | :--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `integration.ts`      | The sanctioned hook surface. Applies a profile to a content-generator config, resolves the active provider, performs a session switch, and answers whether the session is on an OpenAI-compatible backend. |
-| `providers.ts`        | The provider file: schema, validation, read/write, credential resolution, and model write-back.                                                                                                            |
-| `providers.test.ts`   | Coverage for the above.                                                                                                                                                                                    |
-| `addProvider.test.ts` | Coverage for appending a provider.                                                                                                                                                                         |
+| File                       | Purpose                                                                                                                                                                                                    |
+| :------------------------- | :--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `integration.ts`           | The sanctioned hook surface. Applies a profile to a content-generator config, resolves the active provider, performs a session switch, and answers whether the session is on an OpenAI-compatible backend. |
+| `providers.ts`             | The provider file: schema, validation, read/write, credential resolution, and model write-back.                                                                                                            |
+| `providers.test.ts`        | Coverage for the above.                                                                                                                                                                                    |
+| `addProvider.test.ts`      | Coverage for appending a provider.                                                                                                                                                                         |
+| `opencode/headers.ts`      | OpenCode client-identity headers, opt-in via `security.auth.openAiOpencodeHeaders`; the session-id encoding is documented inline.                                                                          |
+| `opencode/headers.test.ts` | Coverage for the above: header set, session-id clock encoding, opt-in gate, and precedence against configured headers.                                                                                     |
 
 Upstream (do not treat as fork-owned): `constants.ts`, `converters.ts`,
 `openaiClient.ts`, `openaiContentGenerator.ts`, `types.ts`, `index.ts`, and
@@ -82,3 +84,24 @@ This matters because `createContentGeneratorConfig` has callers that have
 nothing to do with providers — embedding-only sessions, tests passing a stub
 config, subagents. Reading a personal file unconditionally would make all of
 them depend on it.
+
+## OpenCode request headers
+
+Some OpenAI-compatible endpoints accept a valid credential but still gate on the
+_client identity_: a request that does not carry OpenCode's headers is
+answered 403. `security.auth.openAiOpencodeHeaders` (off by default) sends that
+header set when the session is on an OpenAI-compatible backend.
+
+The headers are derived from the conversation's session id, so they stay stable
+for the life of the session — the endpoint groups quota and cache affinity by
+session, and a fresh id per request would both break that and look like a
+different client every turn. The disguise sits at the _bottom_ of the header
+precedence chain: a provider profile's headers and any explicitly configured
+header still win, so enabling the setting cannot clobber an endpoint that needs
+its own headers.
+
+The exact encoding of the session id (a truncated, inverted millisecond clock)
+is documented in `opencode/headers.ts`; it is copied from `opencode2dsh`, which
+validated it against the live service. Only enable the setting for endpoints
+that need the disguise — sending OpenCode headers to an endpoint that does not
+expect them is at best noise.
