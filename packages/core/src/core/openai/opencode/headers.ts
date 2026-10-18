@@ -90,16 +90,25 @@ export function invertedTimestampHex(now: number = Date.now()): string {
 }
 
 /**
- * A user agent in the shape the OpenCode CLI sends, built from this runtime's
- * own values.
+ * The user agent the disguise sends, pinned to one exact string.
  *
- * The platform, architecture, and Node version are reported verbatim rather
- * than faked, for the same reason `opencode2dsh` does it: an environment claim
- * that disagrees with the request's actual TLS/HTTP behaviour is a stronger
- * signal than a missing header.
+ * Deliberately not derived from the current runtime. The endpoint was validated
+ * against the reference OpenCode build, and requests claiming another platform
+ * (a Termux `linux arm64` build, for instance) were observed to fail while the
+ * identical request with this string succeeded. A platform claim that disagrees
+ * with the client the service expects is a mismatch, not extra honesty, so the
+ * reference value is reproduced verbatim.
+ */
+export const OPENCODE_USER_AGENT = `opencode/${OPENCODE_USER_AGENT_VERSION} (darwin x64; node26.10.0)`;
+
+/**
+ * The user agent header value.
+ *
+ * Kept as a function because the header set is assembled through it and the
+ * value is part of the client identity: callers must not hand-assemble it.
  */
 export function opencodeUserAgent(): string {
-  return `opencode/${OPENCODE_USER_AGENT_VERSION} (${process.platform} ${process.arch}; node${process.versions.node})`;
+  return OPENCODE_USER_AGENT;
 }
 
 /**

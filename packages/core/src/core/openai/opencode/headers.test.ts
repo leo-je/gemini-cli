@@ -15,6 +15,7 @@ import {
 } from '../../contentGenerator.js';
 import { applyProviderToContentGeneratorConfig } from '../integration.js';
 import {
+  OPENCODE_USER_AGENT,
   OPENCODE_USER_AGENT_VERSION,
   buildOpencodeDisguiseHeaders,
   canonicalOpencodeSessionId,
@@ -115,13 +116,14 @@ describe('canonicalOpencodeSessionId', () => {
 });
 
 describe('opencodeUserAgent', () => {
-  it('reports the OpenCode version and this runtime', () => {
-    const userAgent = opencodeUserAgent();
-
-    expect(userAgent).toContain(`opencode/${OPENCODE_USER_AGENT_VERSION}`);
-    expect(userAgent).toContain(process.platform);
-    expect(userAgent).toContain(process.arch);
-    expect(userAgent).toContain(`node${process.versions.node}`);
+  it('pins the reference client identity instead of the local runtime', () => {
+    // Regression: deriving the platform from `process` made a Termux build
+    // claim `linux arm64`, and the endpoint rejected those requests. The value
+    // must be identical on every platform the CLI runs on.
+    expect(opencodeUserAgent()).toBe(
+      `opencode/${OPENCODE_USER_AGENT_VERSION} (darwin x64; node26.10.0)`,
+    );
+    expect(opencodeUserAgent()).toBe(OPENCODE_USER_AGENT);
   });
 });
 

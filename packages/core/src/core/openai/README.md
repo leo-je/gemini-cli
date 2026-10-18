@@ -113,6 +113,9 @@ its own headers.
 
 The exact encoding of the session id (a truncated, inverted millisecond clock)
 is documented in `opencode/headers.ts`; it is copied from `opencode2dsh`, which
-validated it against the live service. Only enable the setting for endpoints
-that need the disguise — sending OpenCode headers to an endpoint that does not
-expect them is at best noise.
+validated it against the live service. The `user-agent` is pinned to the
+reference string rather than derived from the local runtime: the endpoint was
+validated against that build, and a Termux `linux arm64` claim failed where the
+identical request with the pinned value succeeded. Only enable the setting for
+endpoints that need the disguise — sending OpenCode headers to an endpoint that
+does not expect them is at best noise.
