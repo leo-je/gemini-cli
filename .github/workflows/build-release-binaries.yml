@@ -454,6 +454,21 @@ jobs:
           # credential for it.
           registry-url: 'https://registry.npmjs.org'
 
+      - name: 'Check the npm token'
+        env:
+          NODE_AUTH_TOKEN: '${{ secrets.NPM_TOKEN }}'
+        run: |
+          set -euo pipefail
+
+          # A missing secret otherwise fails much later, inside npm, as an
+          # unsubscribe-able E401 that says nothing about what to fix.
+          if [ -z "${NODE_AUTH_TOKEN:-}" ]; then
+            echo "::error::The NPM_TOKEN secret is empty or missing. Add an npm access token with publish rights under Settings -> Secrets and variables -> Actions, then re-run this job."
+            exit 1
+          fi
+          # Proves the token authenticates before anything is uploaded.
+          npm whoami
+
       - name: 'Download the bundle tarball'
         uses: 'actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0' # ratchet:actions/download-artifact@v5
         with:
@@ -475,6 +490,13 @@ jobs:
             echo "No bundle tarball was downloaded." >&2
             exit 1
           fi
+
+          # npm reads a bare path as a hosted git spec ("ssh://git@github.com/..."),
+          # so the tarball has to be spelled as a local file.
+          case "$TARBALL" in
+            /*) ;;
+            *) TARBALL="./$TARBALL" ;;
+          esac
 
           # Read the manifest out of the tarball rather than package.json: the
           # archive is what gets published, and npm takes the name and version
