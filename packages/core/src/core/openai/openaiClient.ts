@@ -22,6 +22,7 @@
  */
 
 import { gunzipSync, inflateSync } from 'node:zlib';
+import { fetch as undiciFetch } from 'undici';
 import type * as undici from 'undici';
 import { createSafeProxyAgent, isLoopbackHost } from '../../utils/fetch.js';
 import { debugLogger } from '../../utils/debugLogger.js';
@@ -282,6 +283,19 @@ export class OpenAICompatibleClient {
   private readonly apiKey: string;
   private readonly extraHeaders: Record<string, string>;
   private readonly dispatcher: undici.Dispatcher | undefined;
+  /**
+   * `fetch` from the same undici instance that created `dispatcher`.
+   *
+   * A dispatcher cannot be handed to the platform `fetch`: the two undici
+   * copies do not share the private symbols that carry a request through the
+   * dispatcher, so the platform `fetch` treats the proxied hop's raw bytes as
+   * the response body — a 200 with TLS-looking garbage that later fails JSON
+   * parsing — or throws a bare `TypeError: fetch failed`. Both were reproduced
+   * on Node 26 with the packaged undici 7.10 through ClashX. Keeping `fetch`
+   * and the agent in one instance is the pattern `createProxyAwareFetch` in
+   * `ide-connection-utils.ts` already uses.
+   */
+  private readonly fetchImpl: typeof fetch;
 
   constructor(options: {
     baseUrl: string;
@@ -298,6 +312,10 @@ export class OpenAICompatibleClient {
     this.apiKey = options.apiKey;
     this.extraHeaders = options.headers ?? {};
     this.dispatcher = this.resolveDispatcher(options.proxy);
+    this.fetchImpl = this.dispatcher
+      ? // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion
+        (undiciFetch as unknown as typeof fetch)
+      : fetch;
   }
 
   /**
@@ -377,7 +395,7 @@ export class OpenAICompatibleClient {
       options.dispatcher = this.dispatcher;
     }
     try {
-      const response = await fetch(url, options);
+      const response = await this.fetchImpl(url, options);
       if (!response.ok) {
         bounded.clear();
         throw await toHttpError(response);
@@ -495,7 +513,7 @@ export class OpenAICompatibleClient {
 
     let response: Response;
     try {
-      response = await fetch(url, options);
+      response = await this.fetchImpl(url, options);
       if (!response.ok) throw await toHttpError(response);
     } catch (error) {
       bounded.clear();
