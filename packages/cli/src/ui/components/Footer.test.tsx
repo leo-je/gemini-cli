@@ -630,6 +630,71 @@ describe('<Footer />', () => {
     });
   });
 
+  describe('Footer cache hit formatting', () => {
+    const renderWithCache = async (cached: number, prompt: number) => {
+      const result = await renderWithProviders(<Footer />, {
+        config: mockConfig,
+        width: 120,
+        uiState: {
+          sessionStats: {
+            ...mockSessionStats,
+            metrics: {
+              ...mockSessionStats.metrics,
+              models: {
+                'gemini-pro': {
+                  api: {
+                    totalRequests: 0,
+                    totalErrors: 0,
+                    totalLatencyMs: 0,
+                  },
+                  tokens: {
+                    input: 0,
+                    prompt,
+                    candidates: 0,
+                    total: prompt,
+                    cached,
+                    thoughts: 0,
+                    tool: 0,
+                  },
+                  roles: {},
+                },
+              },
+            },
+          },
+        },
+        settings: createMockSettings({
+          ui: {
+            footer: {
+              items: ['cache-hit'],
+            },
+          },
+        }),
+      });
+      await result.waitUntilReady();
+      return result;
+    };
+
+    it('shows the hit rate together with cached and prompt tokens', async () => {
+      const { lastFrame, unmount } = await renderWithCache(21000, 262000);
+      expect(lastFrame()).toContain('8% ~21k / 262k');
+      unmount();
+    });
+
+    it('keeps one fractional digit in compact counts', async () => {
+      const { lastFrame, unmount } = await renderWithCache(1500, 1500000);
+      expect(lastFrame()).toContain('0% ~1.5k / 1.5m');
+      unmount();
+    });
+
+    it('renders no cache column before any prompt tokens are recorded', async () => {
+      const { lastFrame, unmount } = await renderWithCache(0, 0);
+      const output = lastFrame({ allowEmpty: true }) ?? '';
+      expect(output).not.toContain('cache');
+      expect(output).not.toContain('%');
+      unmount();
+    });
+  });
+
   describe('error summary visibility', () => {
     beforeEach(() => {
       mocks.isDevelopment = false;
