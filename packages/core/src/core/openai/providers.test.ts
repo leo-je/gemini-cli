@@ -11,8 +11,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   loadProviderEntries,
   persistProviderModelId,
+  removeProvider,
   resolveProvider,
   toProfile,
+  updateProvider,
 } from './providers.js';
 
 let tmpDir: string;
@@ -327,5 +329,127 @@ describe('persistProviderModelId', () => {
     writeProviders({ providers: [{ id: 'a', baseUrl: 'https://x/v1' }] });
     persistProviderModelId('a', 'gpt-4o', filePath);
     expect(fs.statSync(filePath).mode & 0o077).toBe(0);
+  });
+});
+
+describe('updateProvider', () => {
+  it('rewrites only the supplied fields and keeps the rest', () => {
+    writeProviders({
+      providers: [
+        {
+          id: 'openrouter',
+          label: 'Old name',
+          baseUrl: 'https://old/v1',
+          modelId: 'gpt-4o',
+          models: [{ modelId: 'gpt-4o', contextWindowSize: 131072 }],
+        },
+      ],
+    });
+
+    updateProvider(
+      'openrouter',
+      { label: 'New name', baseUrl: 'https://new/v1', apiKeyEnv: 'NEW_KEY' },
+      filePath,
+    );
+
+    expect(loadProviderEntries(filePath)).toEqual([
+      {
+        id: 'openrouter',
+        label: 'New name',
+        baseUrl: 'https://new/v1',
+        modelId: 'gpt-4o',
+        apiKeyEnv: 'NEW_KEY',
+        models: [{ modelId: 'gpt-4o', contextWindowSize: 131072 }],
+      },
+    ]);
+  });
+
+  it('preserves keys this version does not know about', () => {
+    writeProviders({
+      providers: [{ id: 'a', baseUrl: 'https://x/v1', futureField: true }],
+      unknownTopLevel: 'preserved',
+    });
+
+    updateProvider('a', { label: 'A' }, filePath);
+
+    const written = JSON.parse(fs.readFileSync(filePath, 'utf8')) as {
+      providers: Array<Record<string, unknown>>;
+      unknownTopLevel?: string;
+    };
+    expect(written.providers[0]).toMatchObject({
+      id: 'a',
+      label: 'A',
+      baseUrl: 'https://x/v1',
+      futureField: true,
+    });
+    expect(written.unknownTopLevel).toBe('preserved');
+  });
+
+  it('rejects invalid values before touching the file', () => {
+    writeProviders({ providers: [{ id: 'a', baseUrl: 'https://x/v1' }] });
+
+    expect(() => updateProvider('a', { baseUrl: '' }, filePath)).toThrow(
+      /Cannot update provider "a"/,
+    );
+    expect(loadProviderEntries(filePath)).toHaveLength(1);
+  });
+
+  it('throws for an unknown provider id', () => {
+    writeProviders({ providers: [{ id: 'a', baseUrl: 'https://x/v1' }] });
+
+    expect(() => updateProvider('nope', { label: 'Nope' }, filePath)).toThrow(
+      /No provider with the id "nope"/,
+    );
+  });
+
+  it('throws when the file does not exist', () => {
+    expect(() => updateProvider('a', { label: 'A' }, filePath)).toThrow(
+      /No provider file exists/,
+    );
+  });
+
+  it('keeps the file private', () => {
+    writeProviders({ providers: [{ id: 'a', baseUrl: 'https://x/v1' }] });
+
+    updateProvider('a', { label: 'A' }, filePath);
+
+    expect(fs.statSync(filePath).mode & 0o077).toBe(0);
+  });
+});
+
+describe('removeProvider', () => {
+  it('removes the named provider and keeps the others', () => {
+    writeProviders({
+      providers: [
+        { id: 'a', baseUrl: 'https://x/v1' },
+        { id: 'b', baseUrl: 'https://y/v1' },
+      ],
+    });
+
+    removeProvider('a', filePath);
+
+    expect(loadProviderEntries(filePath).map((entry) => entry.id)).toEqual([
+      'b',
+    ]);
+  });
+
+  it('leaves an empty providers array when the last one is removed', () => {
+    writeProviders({ providers: [{ id: 'only', baseUrl: 'https://x/v1' }] });
+
+    removeProvider('only', filePath);
+
+    const written = JSON.parse(fs.readFileSync(filePath, 'utf8')) as {
+      providers: unknown[];
+    };
+    expect(written.providers).toEqual([]);
+  });
+
+  it('throws for an unknown provider id instead of reporting a deletion', () => {
+    writeProviders({ providers: [{ id: 'a', baseUrl: 'https://x/v1' }] });
+
+    expect(() => removeProvider('nope', filePath)).toThrow(
+      /No provider with the id "nope"/,
+    );
+    expect(loadProviderEntries(filePath)).toHaveLength(1);
   });
 });

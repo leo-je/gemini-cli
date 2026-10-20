@@ -190,7 +190,16 @@ describe('ProviderModelDialog', () => {
     await waitUntilReady();
     expect(lastFrame()).toContain('saved-model');
 
-    // The model itself.
+    // The model itself, then "Edit token settings" on the action menu.
+    await act(async () => {
+      stdin.write('\r');
+    });
+    await waitUntilReady();
+    expect(lastFrame()).toContain('Edit token settings');
+    await act(async () => {
+      stdin.write('\u001b[B');
+    });
+    await waitUntilReady();
     await act(async () => {
       stdin.write('\r');
     });
@@ -198,13 +207,13 @@ describe('ProviderModelDialog', () => {
     expect(lastFrame()).toContain('Context window size');
 
     await act(async () => {
-      currentInput().onSubmit('131072');
+      currentInput().onSubmit('128k');
     });
     await waitUntilReady();
     expect(lastFrame()).toContain('Maximum output tokens');
 
     await act(async () => {
-      currentInput().onSubmit('8192');
+      currentInput().onSubmit('8k');
     });
     await vi.waitFor(() => expect(onClose).toHaveBeenCalled());
 
@@ -218,6 +227,42 @@ describe('ProviderModelDialog', () => {
       'saved-model',
     );
     expect(setModel).toHaveBeenCalledWith('saved-model', true);
+    unmount();
+  });
+
+  it('rejects a malformed token count instead of saving it', async () => {
+    seedProvider([{ modelId: 'saved-model' }]);
+
+    const { lastFrame, stdin, waitUntilReady, unmount } = await renderDialog();
+    await waitUntilReady();
+
+    await act(async () => {
+      stdin.write('\r');
+    });
+    await waitUntilReady();
+    await act(async () => {
+      stdin.write('\r');
+    });
+    await waitUntilReady();
+    // Move to "Edit token settings" and open it.
+    await act(async () => {
+      stdin.write('\u001b[B');
+    });
+    await waitUntilReady();
+    await act(async () => {
+      stdin.write('\r');
+    });
+    await waitUntilReady();
+
+    await act(async () => {
+      currentInput().onSubmit('12x');
+    });
+    await waitUntilReady();
+
+    expect(lastFrame()).toContain('128k or 131072');
+    expect(readProviderDocument().providers[0].models).toEqual([
+      { modelId: 'saved-model' },
+    ]);
     unmount();
   });
 
@@ -238,6 +283,15 @@ describe('ProviderModelDialog', () => {
       stdin.write('\r');
     });
     await waitUntilReady();
+    // "Edit token settings" is the second action.
+    await act(async () => {
+      stdin.write('\u001b[B');
+    });
+    await waitUntilReady();
+    await act(async () => {
+      stdin.write('\r');
+    });
+    await waitUntilReady();
 
     await act(async () => {
       currentInput().onSubmit('');
@@ -250,6 +304,42 @@ describe('ProviderModelDialog', () => {
 
     expect(readProviderDocument().providers[0].models).toEqual([
       { modelId: 'saved-model', contextWindowSize: 131_072, maxToken: 8_192 },
+    ]);
+    unmount();
+  });
+
+  it('applies the pick without opening the token settings', async () => {
+    seedProvider([{ modelId: 'saved-model' }]);
+
+    const { lastFrame, stdin, waitUntilReady, unmount } = await renderDialog();
+    await waitUntilReady();
+
+    // "Current model list"
+    await act(async () => {
+      stdin.write('\r');
+    });
+    await waitUntilReady();
+    // The model itself.
+    await act(async () => {
+      stdin.write('\r');
+    });
+    await waitUntilReady();
+    expect(lastFrame()).toContain('Apply model');
+
+    // The first action applies the model as-is.
+    await act(async () => {
+      stdin.write('\r');
+    });
+    await vi.waitFor(() => expect(onClose).toHaveBeenCalled());
+
+    expect(setModel).toHaveBeenCalledWith('saved-model', true);
+    expect(mockedRememberModel).toHaveBeenCalledWith(
+      PROVIDER_ID,
+      'saved-model',
+    );
+    // No settings step ran, so the provider file is unchanged.
+    expect(readProviderDocument().providers[0].models).toEqual([
+      { modelId: 'saved-model' },
     ]);
     unmount();
   });

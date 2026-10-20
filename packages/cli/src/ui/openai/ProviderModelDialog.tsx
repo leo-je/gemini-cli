@@ -27,6 +27,7 @@ import {
   getProviderModels,
   logModelSlashCommand,
   mergeProviderModels,
+  parseTokenCount,
   saveProviderModelSettings,
   type OpenAiProviderModel,
 } from '@google/gemini-cli-core';
@@ -55,6 +56,7 @@ type Phase =
   | { status: 'error'; message: string }
   | { status: 'source' }
   | { status: 'list' }
+  | { status: 'actions'; modelId: string }
   | { status: 'settings'; modelId: string; step: SettingsStep };
 
 /** Items that are actions rather than model ids. */
@@ -66,17 +68,14 @@ const REFRESH_ITEM = '__refresh__';
  *
  * `undefined` means "not supplied" (keep the saved value) and must stay
  * distinguishable from a number, so an invalid input is reported separately.
+ * The shorthand (`128k`, `1m`) is accepted and converted to whole tokens.
  */
-function parsePositiveInteger(raw: string): number | undefined | 'invalid' {
+function parseTokenField(raw: string): number | undefined | 'invalid' {
   const trimmed = raw.trim();
   if (trimmed.length === 0) {
     return undefined;
   }
-  const value = Number(trimmed);
-  if (!Number.isInteger(value) || value <= 0) {
-    return 'invalid';
-  }
-  return value;
+  return parseTokenCount(trimmed);
 }
 
 function describeModel(
@@ -182,6 +181,11 @@ export function ProviderModelDialog({
           return false;
         }
         if (phase.status === 'settings') {
+          setPhase({ status: 'list' });
+          setFormError(undefined);
+          return true;
+        }
+        if (phase.status === 'actions') {
           setPhase({ status: 'list' });
           setFormError(undefined);
           return true;
@@ -297,23 +301,21 @@ export function ProviderModelDialog({
       }
       setSettingsValues({});
       setFormError(undefined);
-      setPhase({
-        status: 'settings',
-        modelId: value,
-        step: 'contextWindowSize',
-      });
+      setPhase({ status: 'actions', modelId: value });
     },
     [config, loadRemote, providerId],
   );
 
   const finishSettings = useCallback(
     (modelId: string, maxTokenRaw: string) => {
-      const contextWindowSize = parsePositiveInteger(
+      const contextWindowSize = parseTokenField(
         settingsValues.contextWindowSize ?? '',
       );
-      const maxToken = parsePositiveInteger(maxTokenRaw);
+      const maxToken = parseTokenField(maxTokenRaw);
       if (contextWindowSize === 'invalid' || maxToken === 'invalid') {
-        setFormError('Token counts must be positive whole numbers, or empty.');
+        setFormError(
+          'Token counts must be a positive whole number, optionally with a k or m suffix (e.g. 128k, 1m), or empty.',
+        );
         return;
       }
       const saved = saveProviderModelSettings(providerId, modelId, {
@@ -342,9 +344,9 @@ export function ProviderModelDialog({
         return;
       }
       if (phase.step === 'contextWindowSize') {
-        if (parsePositiveInteger(value) === 'invalid') {
+        if (parseTokenField(value) === 'invalid') {
           setFormError(
-            'Context window must be a positive whole number, or empty.',
+            'Context window must be a positive whole number (e.g. 128k or 131072), or empty.',
           );
           return;
         }
@@ -363,6 +365,55 @@ export function ProviderModelDialog({
       finishSettings(phase.modelId, value);
     },
     [phase, finishSettings],
+  );
+
+  const actionItems = useMemo(() => {
+    const selected =
+      phase.status === 'actions'
+        ? models.find((model) => model.modelId === phase.modelId)
+        : undefined;
+    const savedSettings =
+      selected &&
+      (selected.contextWindowSize !== undefined ||
+        selected.maxToken !== undefined)
+        ? describeModel(selected, undefined)
+        : undefined;
+    return [
+      {
+        key: 'apply',
+        value: 'apply',
+        title: 'Apply model',
+        description: savedSettings
+          ? `Use it now with its saved settings (${savedSettings})`
+          : 'Use it now; no token settings are saved for it',
+      },
+      {
+        key: 'customize',
+        value: 'customize',
+        title: 'Edit token settings',
+        description: 'Set the context window and maximum output tokens',
+      },
+    ];
+  }, [models, phase]);
+
+  const handleActionSelect = useCallback(
+    (value: string) => {
+      if (phase.status !== 'actions') {
+        return;
+      }
+      if (value === 'customize') {
+        setSettingsValues({});
+        setFormError(undefined);
+        setPhase({
+          status: 'settings',
+          modelId: phase.modelId,
+          step: 'contextWindowSize',
+        });
+        return;
+      }
+      onClose();
+    },
+    [onClose, phase],
   );
 
   if (phase.status === 'loading') {
@@ -404,6 +455,37 @@ export function ProviderModelDialog({
     );
   }
 
+  if (phase.status === 'actions') {
+    return (
+      <Box
+        borderStyle="round"
+        borderColor={theme.border.default}
+        flexDirection="column"
+        padding={1}
+      >
+        <Text bold>Select Model</Text>
+        <Box marginTop={1} flexDirection="column">
+          <Text color={theme.text.primary}>{phase.modelId}</Text>
+          <Text color={theme.text.secondary}>
+            Provider: {providerId} · {endpoint}
+          </Text>
+        </Box>
+        <Box marginTop={1}>
+          <DescriptiveRadioButtonSelect
+            items={actionItems}
+            onSelect={handleActionSelect}
+            showNumbers={true}
+          />
+        </Box>
+        <Box marginTop={1}>
+          <Text color={theme.text.secondary}>
+            (Enter to select · Esc to go back)
+          </Text>
+        </Box>
+      </Box>
+    );
+  }
+
   if (phase.status === 'settings') {
     const step = phase.step;
     const isLastStep = step === 'maxToken';
@@ -421,8 +503,8 @@ export function ProviderModelDialog({
           </Text>
           <Text color={theme.text.secondary}>
             {isLastStep
-              ? 'The most output tokens to request from this model, e.g. 8192. Leave empty to keep the saved value.'
-              : 'The real context window of this model in tokens, e.g. 131072. Leave empty to keep the saved value.'}
+              ? 'The most output tokens to request from this model, e.g. 8192 or 8k. Leave empty to keep the saved value.'
+              : 'The real context window of this model in tokens, e.g. 131072 or 128k. Leave empty to keep the saved value.'}
           </Text>
         </Box>
         <Box
@@ -537,7 +619,7 @@ function SettingsInput({
     initialText: initialValue,
     initialCursorOffset: initialValue.length,
     viewport: { width: terminalWidth - 8, height: 1 },
-    inputFilter: (text) => text.replace(/[^0-9]/g, ''),
+    inputFilter: (text) => text.replace(/[^0-9.kmKM]/g, ''),
     singleLine: true,
   });
 
