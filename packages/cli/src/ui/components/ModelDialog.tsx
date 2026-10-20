@@ -34,6 +34,7 @@ import { DescriptiveRadioButtonSelect } from './shared/DescriptiveRadioButtonSel
 import { ConfigContext } from '../contexts/ConfigContext.js';
 import {
   OpenAiModelDialog,
+  ProviderModelDialog,
   rememberModelForProvider,
 } from '../openai/index.js';
 import { useSettings } from '../contexts/SettingsContext.js';
@@ -366,6 +367,19 @@ export function ModelDialog({
   // Returned before any Gemini-specific state below is rendered, but after the
   // hooks above — hook order stays stable across the two modes.
   if (openAiEndpoint) {
+    // A configured provider also records per-model token settings (context
+    // window and max output), so its picker collects them; a bare endpoint has
+    // nowhere to save them and keeps the simpler list.
+    const openAiProviderId = config?.getActiveOpenAiProviderId?.();
+    if (openAiProviderId) {
+      return (
+        <ProviderModelDialog
+          endpoint={openAiEndpoint}
+          providerId={openAiProviderId}
+          onClose={onClose}
+        />
+      );
+    }
     return (
       <OpenAiModelDialog
         endpoint={openAiEndpoint}

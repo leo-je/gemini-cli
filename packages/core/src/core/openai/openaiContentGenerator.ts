@@ -47,7 +47,12 @@ import {
   toOpenAIEmbeddingRequest,
   toOpenAIRequest,
 } from './converters.js';
-import type { OpenAIChatCompletion, OpenAIResponseToolCall } from './types.js';
+import type {
+  OpenAIChatCompletion,
+  OpenAIChatCompletionRequest,
+  OpenAIResponseToolCall,
+} from './types.js';
+import { getProviderModelSettings } from './providerModels.js';
 import {
   OPENAI_HEADERS_ENV,
   OPENAI_MODEL_ID_ENV,
@@ -97,9 +102,16 @@ export class OpenAIContentGenerator implements ContentGenerator {
    */
   private readonly configModelId: string | undefined;
   private readonly gcConfig: Config;
+  /**
+   * The provider profile this session was built from, captured at construction
+   * because `/model` does not rebuild the generator. Used to look up per-model
+   * token overrides; `undefined` for a single-endpoint configuration.
+   */
+  private readonly providerId: string | undefined;
 
   constructor(config: ContentGeneratorConfig, gcConfig: Config) {
     this.gcConfig = gcConfig;
+    this.providerId = config.providerId;
     this.configModelId = config.modelId;
     this.configuredModelId = readEnvWithFallback(
       OPENAI_MODEL_ID_ENV,
@@ -159,6 +171,32 @@ export class OpenAIContentGenerator implements ContentGenerator {
     return fallback;
   }
 
+  /**
+   * Applies the provider profile's output cap to the request body.
+   *
+   * The shared request path only sets `max_tokens` when the caller asked for a
+   * limit, and OpenAI-compatible endpoints have no agreed default — many serve
+   * their own maximum, which can be far more output than the user wants to pay
+   * for. The profile's `maxToken` is a fallback, never an override: a limit
+   * already present on the request always wins.
+   */
+  private applyConfiguredMaxOutputTokens(
+    body: OpenAIChatCompletionRequest,
+    modelId: string,
+  ): void {
+    if (body.max_tokens !== undefined) {
+      return;
+    }
+    const providerId =
+      this.gcConfig.getActiveOpenAiProviderId?.() ?? this.providerId;
+    const maxToken = providerId
+      ? getProviderModelSettings(providerId, modelId)?.maxToken
+      : undefined;
+    if (maxToken !== undefined && maxToken > 0) {
+      body.max_tokens = maxToken;
+    }
+  }
+
   async generateContent(
     request: GenerateContentParameters,
     _userPromptId: string,
@@ -166,6 +204,7 @@ export class OpenAIContentGenerator implements ContentGenerator {
   ): Promise<GenerateContentResponse> {
     const modelId = this.resolveModelId();
     const body = toOpenAIRequest(request, modelId, false);
+    this.applyConfiguredMaxOutputTokens(body, modelId);
     if (this.gcConfig.getOpenAiOpencodeHeaders?.()) {
       // The free lane checks for agent-shaped tools; see opencode/body.ts.
       ensureOpencodeFreeLaneShape(body);
@@ -190,6 +229,7 @@ export class OpenAIContentGenerator implements ContentGenerator {
   ): Promise<AsyncGenerator<GenerateContentResponse>> {
     const modelId = this.resolveModelId();
     const body = toOpenAIRequest(request, modelId, true);
+    this.applyConfiguredMaxOutputTokens(body, modelId);
     if (this.gcConfig.getOpenAiOpencodeHeaders?.()) {
       // The free lane checks for agent-shaped tools; see opencode/body.ts.
       ensureOpencodeFreeLaneShape(body);

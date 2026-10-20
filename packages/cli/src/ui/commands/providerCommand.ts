@@ -12,10 +12,7 @@ import {
 import { MessageType } from '../types.js';
 import { isOpenAiBackend } from '../openai/index.js';
 import { providerDialogAction } from '../openai/providerDialogRouting.js';
-import {
-  persistProviderId,
-  providerHasDefaultModel,
-} from '../openai/openAiProviderPreference.js';
+import { persistProviderId } from '../openai/openAiProviderPreference.js';
 
 const listProvidersCommand: SlashCommand = {
   name: 'list',
@@ -73,28 +70,20 @@ const useProviderCommand: SlashCommand = {
     // provider file's first entry.
     persistProviderId(context.services.settings, id);
 
-    // A provider with no default model cannot send a message until one is
-    // chosen, so ask for it here rather than leaving a session that fails on the
-    // next prompt. The dialog action is the one `/model list` uses.
-    if (!providerHasDefaultModel(id)) {
-      context.ui.addItem({
-        type: MessageType.INFO,
-        text: `Provider switched to ${id}. It has no default model, so pick one from the list.`,
-      });
-      return {
-        type: 'dialog',
-        dialog: 'model',
-        props: {
-          openAiEndpoint: config.getContentGeneratorConfig()?.baseUrl,
-        },
-      };
-    }
-
+    // Always open the picker: a provider with no saved model list is fetched
+    // into one, and a provider that has one still needs its per-model token
+    // settings collected before the session can size its context window.
     context.ui.addItem({
       type: MessageType.INFO,
-      text: `Provider switched to ${id}.`,
+      text: `Provider switched to ${id}. Pick a model and its token settings below.`,
     });
-    return undefined;
+    return {
+      type: 'dialog',
+      dialog: 'model',
+      props: {
+        openAiEndpoint: config.getContentGeneratorConfig()?.baseUrl,
+      },
+    };
   },
 };
 

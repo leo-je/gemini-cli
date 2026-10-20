@@ -51,6 +51,97 @@ const PROVIDER_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]*$/;
 /** Env var names must be usable as `process.env[...]` keys and in `.env`. */
 const ENV_VAR_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
+/**
+ * One model entry under a provider's optional `models` array.
+ *
+ * The array is the place a provider records the numbers an OpenAI-compatible
+ * endpoint does not advertise: the real context window and the maximum output
+ * tokens. Both are optional, so the array can also just be a saved copy of the
+ * endpoint's model list.
+ */
+export interface OpenAiProviderModel {
+  modelId: string;
+  /** Total context window of the model, in tokens. */
+  contextWindowSize?: number;
+  /** Maximum output tokens to request from the model. */
+  maxToken?: number;
+}
+
+/**
+ * Multipliers for the shorthand humans use for token counts.
+ *
+ * "128k context" means 128 × 1024 = 131072 tokens, not 128000, so the suffix
+ * is binary. Same for `m`.
+ */
+const TOKEN_COUNT_UNITS: Record<string, number> = {
+  k: 1024,
+  m: 1024 * 1024,
+};
+
+const TOKEN_COUNT_HINT =
+  'must be a positive whole number, optionally with a k or m suffix (e.g. 128k, 1m)';
+
+/**
+ * Parses a token count written as a plain number or with a `k` or `m` suffix.
+ *
+ * Returns `'invalid'` instead of throwing so callers can report one message.
+ * A value smaller than one, a scientific-notation string, and a fractional
+ * count without a suffix are all rejected; a suffix may be fractional
+ * (`1.5m`) because the rounded result is still a whole number of tokens.
+ */
+export function parseTokenCount(raw: string): number | 'invalid' {
+  const match = /^(\d+(?:\.\d+)?)\s*([km])?$/i.exec(raw.trim());
+  if (!match) {
+    return 'invalid';
+  }
+  const amount = Number(match[1]);
+  const unit = match[2]?.toLowerCase();
+  const value = unit ? Math.round(amount * TOKEN_COUNT_UNITS[unit]) : amount;
+  if (!Number.isSafeInteger(value) || value <= 0) {
+    return 'invalid';
+  }
+  return value;
+}
+
+/** Normalizes a JSON token count: a number, or a `k`/`m` shorthand string. */
+export function normalizeTokenCount(raw: unknown): number | 'invalid' {
+  if (typeof raw === 'number') {
+    return Number.isSafeInteger(raw) && raw > 0 ? raw : 'invalid';
+  }
+  if (typeof raw === 'string') {
+    return parseTokenCount(raw);
+  }
+  return 'invalid';
+}
+
+/**
+ * A token count in the provider file.
+ *
+ * Hand-edited files may use the same shorthand as the dialogs (`"contextWindowSize": "128k"`),
+ * so the value is normalized to a plain integer before anything reads it.
+ */
+const tokenCountSchema = z
+  .union([z.number(), z.string()])
+  .transform((value, ctx) => {
+    const parsed = normalizeTokenCount(value);
+    if (parsed === 'invalid') {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: TOKEN_COUNT_HINT,
+      });
+      return z.NEVER;
+    }
+    return parsed;
+  });
+
+const providerModelSchema = z
+  .object({
+    modelId: z.string().min(1),
+    contextWindowSize: tokenCountSchema.optional(),
+    maxToken: tokenCountSchema.optional(),
+  })
+  .strict();
+
 const providerSchema = z
   .object({
     id: z
@@ -70,6 +161,8 @@ const providerSchema = z
     headers: z
       .record(z.string(), z.union([z.string(), z.number(), z.boolean()]))
       .optional(),
+    /** Saved model list with optional per-model overrides. */
+    models: z.array(providerModelSchema).optional(),
   })
   .strict();
 
@@ -212,6 +305,31 @@ function formatZodError(error: z.ZodError): string {
       return `${at}: ${issue.message}`;
     })
     .join('; ');
+}
+
+/**
+ * Validates a `models` array before it is written back to the provider file.
+ *
+ * The writer rewrites the raw JSON without a round-trip through the reader, so
+ * an invalid entry would only be discovered on the next start — when the whole
+ * provider file fails to load. Checking here keeps a bad edit a rejected write
+ * instead of a file the CLI can no longer read.
+ */
+export function validateProviderModels(models: unknown): OpenAiProviderModel[] {
+  const parsed = z.array(providerModelSchema).safeParse(models);
+  if (!parsed.success) {
+    throw new Error(`Invalid models list: ${formatZodError(parsed.error)}`);
+  }
+  const seen = new Set<string>();
+  for (const model of parsed.data) {
+    if (seen.has(model.modelId)) {
+      throw new Error(
+        `The model "${model.modelId}" is listed more than once in this provider.`,
+      );
+    }
+    seen.add(model.modelId);
+  }
+  return parsed.data;
 }
 
 /** Narrows an unknown to a plain JSON object. Arrays are excluded. */
@@ -508,4 +626,149 @@ export function persistProviderModelId(
     );
     return false;
   }
+}
+
+/**
+ * The editable fields of an existing provider.
+ *
+ * Omitted (or `undefined`) fields keep their current value: the edit dialog
+ * never needs to clear a field, so "no opinion" and "clear" do not have to be
+ * distinguished.
+ */
+export interface OpenAiProviderUpdate {
+  label?: string;
+  baseUrl?: string;
+  modelId?: string;
+  apiKeyEnv?: string;
+  apiKey?: string;
+}
+
+const providerUpdateSchema = providerSchema
+  .pick({
+    label: true,
+    baseUrl: true,
+    modelId: true,
+    apiKeyEnv: true,
+    apiKey: true,
+  })
+  .partial();
+
+/** Reads the raw document, turning every failure into a user-facing error. */
+function readProviderDocument(
+  filePath: string,
+  action: string,
+): Record<string, unknown> {
+  let existing: string;
+  try {
+    existing = fs.readFileSync(filePath, 'utf8');
+  } catch {
+    throw new Error(
+      `No provider file exists at ${filePath}, so a provider cannot be ${action}.`,
+    );
+  }
+
+  let document: unknown;
+  try {
+    document = JSON.parse(existing.replace(/^\uFEFF/, ''));
+  } catch (error) {
+    throw new Error(
+      `${filePath} must be valid JSON before a provider can be ${action} (${getErrorMessage(error)}).`,
+    );
+  }
+  if (!isRecord(document)) {
+    throw new Error(
+      `${filePath} must contain a JSON object with a "providers" array.`,
+    );
+  }
+  if (!Array.isArray(document['providers'])) {
+    throw new Error(`${filePath} has a "providers" key that is not an array.`);
+  }
+  return document;
+}
+
+function writeProviderDocument(
+  filePath: string,
+  document: Record<string, unknown>,
+): void {
+  try {
+    fs.mkdirSync(path.dirname(filePath), { recursive: true });
+    fs.writeFileSync(filePath, `${JSON.stringify(document, null, 2)}\n`, {
+      encoding: 'utf8',
+      // The file may carry a literal key, so it keeps its private mode.
+      mode: 0o600,
+    });
+  } catch (error) {
+    throw new Error(`Could not write ${filePath}: ${getErrorMessage(error)}`);
+  }
+}
+
+/**
+ * Rewrites the named fields of an existing provider.
+ *
+ * Only the supplied fields are validated and written; everything else in the
+ * raw entry — including keys this version does not know about — is preserved,
+ * for the same reason `persistProviderModelId` rewrites raw JSON.
+ */
+export function updateProvider(
+  providerId: string,
+  update: OpenAiProviderUpdate,
+  filePath: string = getOpenAiProvidersPath(),
+): void {
+  const parsed = providerUpdateSchema.safeParse(update);
+  if (!parsed.success) {
+    throw new Error(
+      `Cannot update provider "${providerId}": ${formatZodError(parsed.error)}`,
+    );
+  }
+
+  const document = readProviderDocument(filePath, 'updated');
+  const rawProviders = document['providers'];
+  if (!Array.isArray(rawProviders)) {
+    throw new Error(`${filePath} has a "providers" key that is not an array.`);
+  }
+  const providers: unknown[] = rawProviders;
+  const entry = providers.find(
+    (candidate): candidate is Record<string, unknown> =>
+      isRecord(candidate) && candidate['id'] === providerId,
+  );
+  if (!entry) {
+    throw new Error(
+      `No provider with the id "${providerId}" exists in ${filePath}.`,
+    );
+  }
+
+  for (const [field, value] of Object.entries(parsed.data)) {
+    if (value !== undefined) {
+      entry[field] = value;
+    }
+  }
+  writeProviderDocument(filePath, document);
+}
+
+/**
+ * Removes one provider from the user-level file.
+ *
+ * Throws when the id is not there, so a dialog cannot report a deletion that
+ * never happened.
+ */
+export function removeProvider(
+  providerId: string,
+  filePath: string = getOpenAiProvidersPath(),
+): void {
+  const document = readProviderDocument(filePath, 'removed');
+  const rawProviders = document['providers'];
+  if (!Array.isArray(rawProviders)) {
+    throw new Error(`${filePath} has a "providers" key that is not an array.`);
+  }
+  const providers: unknown[] = rawProviders;
+  const remaining = providers.filter(
+    (candidate) => !(isRecord(candidate) && candidate['id'] === providerId),
+  );
+  if (remaining.length === providers.length) {
+    throw new Error(
+      `No provider with the id "${providerId}" exists in ${filePath}.`,
+    );
+  }
+  document['providers'] = remaining;
+  writeProviderDocument(filePath, document);
 }

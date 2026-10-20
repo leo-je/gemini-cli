@@ -55,23 +55,36 @@ export function addOpenAiProvider(
     return { providerPath, envPath: null };
   }
 
+  const savedEnv = saveProviderApiKey(values.id, values.apiKey, envPath);
+  return { providerPath, envPath: savedEnv ? envPath : null, apiKeyEnv };
+}
+
+/**
+ * Writes a provider's key to the user-level `.env` and makes it visible here.
+ *
+ * Shared by the add and edit flows so both store credentials the same way.
+ * Returns the variable name the key was stored under, or null when the file
+ * could not be written; the caller decides whether that aborts the change.
+ */
+export function saveProviderApiKey(
+  providerId: string,
+  apiKey: string,
+  envPath: string = defaultOpenAiEnvPath(),
+): string | null {
+  const apiKeyEnv = apiKeyEnvName(providerId);
   try {
     fs.mkdirSync(path.dirname(envPath), { recursive: true });
-    fs.writeFileSync(
-      envPath,
-      renderEnvFile(envPath, [[apiKeyEnv, values.apiKey]]),
-      {
-        encoding: 'utf8',
-        mode: 0o600,
-      },
-    );
+    fs.writeFileSync(envPath, renderEnvFile(envPath, [[apiKeyEnv, apiKey]]), {
+      encoding: 'utf8',
+      mode: 0o600,
+    });
     // Made visible to this process as well, so the provider resolves without a
     // restart. `loadEnvironment` only fills unset variables, so a project-level
     // `.env` would otherwise shadow the value just written.
-    process.env[apiKeyEnv] = values.apiKey;
-    return { providerPath, envPath, apiKeyEnv };
+    process.env[apiKeyEnv] = apiKey;
+    return apiKeyEnv;
   } catch (error) {
     debugLogger.debug('Failed to persist the provider API key:', error);
-    return { providerPath, envPath: null, apiKeyEnv };
+    return null;
   }
 }

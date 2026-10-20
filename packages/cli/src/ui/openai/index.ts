@@ -29,6 +29,7 @@ export {
   type RemoteModelListing,
 } from './openAiModelList.js';
 export { OpenAiModelDialog } from './OpenAiModelDialog.js';
+export { ProviderModelDialog } from './ProviderModelDialog.js';
 export { ProviderDialog } from './ProviderDialog.js';
 export {
   AddProviderDialog,

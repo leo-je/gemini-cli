@@ -15,6 +15,7 @@
 export * from './types.js';
 export * from './constants.js';
 export * from './providers.js';
+export * from './providerModels.js';
 export * from './integration.js';
 export * from './converters.js';
 export * from './openaiClient.js';
