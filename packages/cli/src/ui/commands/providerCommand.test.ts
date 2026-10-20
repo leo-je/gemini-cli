@@ -185,7 +185,9 @@ describe('providerCommand', () => {
     });
   });
 
-  it('switch: stays quiet about models when the provider has a default', async () => {
+  it('switch: opens the model picker even when the provider has a default', async () => {
+    // A default model still needs its per-model token settings captured, so the
+    // picker is presented rather than silently keeping the default.
     writeProviders([
       {
         id: 'openrouter',
@@ -198,12 +200,16 @@ describe('providerCommand', () => {
     const use = providerCommand.subCommands!.find((c) => c.name === 'use')!;
     const result = await use.action!(context, 'openrouter');
 
-    expect(result).toBeUndefined();
+    expect(result).toEqual({
+      type: 'dialog',
+      dialog: 'model',
+      props: { openAiEndpoint: 'https://endpoint.test/v1' },
+    });
     expect(addItem).toHaveBeenCalledWith(
       expect.objectContaining({
         type: MessageType.INFO,
         text: expect.stringContaining(
-          'Provider switched to openrouter',
+          'Pick a model and its token settings',
         ) as string,
       }),
     );

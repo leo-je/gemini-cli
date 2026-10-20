@@ -51,6 +51,30 @@ const PROVIDER_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]*$/;
 /** Env var names must be usable as `process.env[...]` keys and in `.env`. */
 const ENV_VAR_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
+/**
+ * One model entry under a provider's optional `models` array.
+ *
+ * The array is the place a provider records the numbers an OpenAI-compatible
+ * endpoint does not advertise: the real context window and the maximum output
+ * tokens. Both are optional, so the array can also just be a saved copy of the
+ * endpoint's model list.
+ */
+export interface OpenAiProviderModel {
+  modelId: string;
+  /** Total context window of the model, in tokens. */
+  contextWindowSize?: number;
+  /** Maximum output tokens to request from the model. */
+  maxToken?: number;
+}
+
+const providerModelSchema = z
+  .object({
+    modelId: z.string().min(1),
+    contextWindowSize: z.number().int().positive().optional(),
+    maxToken: z.number().int().positive().optional(),
+  })
+  .strict();
+
 const providerSchema = z
   .object({
     id: z
@@ -70,6 +94,8 @@ const providerSchema = z
     headers: z
       .record(z.string(), z.union([z.string(), z.number(), z.boolean()]))
       .optional(),
+    /** Saved model list with optional per-model overrides. */
+    models: z.array(providerModelSchema).optional(),
   })
   .strict();
 
@@ -212,6 +238,31 @@ function formatZodError(error: z.ZodError): string {
       return `${at}: ${issue.message}`;
     })
     .join('; ');
+}
+
+/**
+ * Validates a `models` array before it is written back to the provider file.
+ *
+ * The writer rewrites the raw JSON without a round-trip through the reader, so
+ * an invalid entry would only be discovered on the next start — when the whole
+ * provider file fails to load. Checking here keeps a bad edit a rejected write
+ * instead of a file the CLI can no longer read.
+ */
+export function validateProviderModels(models: unknown): OpenAiProviderModel[] {
+  const parsed = z.array(providerModelSchema).safeParse(models);
+  if (!parsed.success) {
+    throw new Error(`Invalid models list: ${formatZodError(parsed.error)}`);
+  }
+  const seen = new Set<string>();
+  for (const model of parsed.data) {
+    if (seen.has(model.modelId)) {
+      throw new Error(
+        `The model "${model.modelId}" is listed more than once in this provider.`,
+      );
+    }
+    seen.add(model.modelId);
+  }
+  return parsed.data;
 }
 
 /** Narrows an unknown to a plain JSON object. Arrays are excluded. */

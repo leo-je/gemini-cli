@@ -86,6 +86,11 @@ import {
   type TelemetryTarget,
 } from '../telemetry/index.js';
 import { coreEvents, CoreEvent } from '../utils/events.js';
+import {
+  activateContextWindow,
+  declareContextWindow,
+} from '../core/contextWindow.js';
+import { getProviderModelSettings } from '../core/openai/providerModels.js';
 import { tokenLimit } from '../core/tokenLimits.js';
 import {
   DEFAULT_GEMINI_EMBEDDING_MODEL,
@@ -2041,6 +2046,34 @@ export class Config implements McpContext, AgentLoopContext {
       this.onModelChange(newModel);
     }
     this.modelAvailabilityService.reset();
+    this.applyOpenAiContextWindow(newModel);
+  }
+
+  /**
+   * Applies the token numbers a provider profile records for `model`.
+   *
+   * Necessary because a model id in OpenAI-compatible mode is an arbitrary
+   * string the compiled-in Gemini limits know nothing about: the same name can
+   * mean a 1M-token model on one endpoint and a 128K one on another. Outside
+   * OpenAI mode this only clears the registry, so Gemini models keep their
+   * compiled-in limits exactly as before.
+   *
+   * `tokenLimit` consults the declared window before its Gemini switch, so
+   * this method only has to keep the registry in sync with the session.
+   */
+  private applyOpenAiContextWindow(model: string): void {
+    if (this.getContentGeneratorConfig()?.authType !== AuthType.USE_OPENAI) {
+      activateContextWindow(undefined);
+      return;
+    }
+    const providerId = this.getActiveOpenAiProviderId();
+    const size = getProviderModelSettings(providerId, model)?.contextWindowSize;
+    if (size === undefined) {
+      activateContextWindow(undefined);
+      return;
+    }
+    declareContextWindow(model, size);
+    activateContextWindow(model);
   }
 
   activateFallbackMode(model: string, failedModel?: string): void {

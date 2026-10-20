@@ -14,11 +14,10 @@
 
 import { useCallback } from 'react';
 import { MessageType } from '../types.js';
-import type { Config } from '@google/gemini-cli-core';
+import { getProviderModels, type Config } from '@google/gemini-cli-core';
 import { addOpenAiProvider } from './addProvider.js';
 import {
   persistProviderId,
-  providerHasDefaultModel,
   type ProviderPreferenceWriter,
 } from './openAiProviderPreference.js';
 import type { NewProviderValues } from './AddProviderDialog.js';
@@ -57,27 +56,24 @@ export function useProviderDialogHandlers(options: {
   } = options;
 
   /**
-   * Reports a completed switch, and asks for a model when the provider has no
-   * default one.
+   * Reports a completed switch and opens the provider's model picker.
    *
-   * A provider may leave `modelId` unset, which is supported by design — the
-   * session is meant to pick from the endpoint's catalog. Nothing did the
-   * picking, though, so the next message failed. Opening the list here closes
-   * that gap; the endpoint is passed so the dialog lists this provider's models
-   * rather than the compiled-in Gemini ones.
+   * The picker is always opened, even when the provider declares a default
+   * model: switching also picks which model the session runs and records its
+   * token settings, and a saved model list means the dialog can show it
+   * immediately instead of fetching. An empty list is fetched by the dialog
+   * itself, so an endpoint with no saved catalog still works.
    */
   const reportSwitch = useCallback(
     (providerId: string, suffix = '') => {
-      if (providerHasDefaultModel(providerId)) {
-        historyManager.addItem({
-          type: MessageType.INFO,
-          text: `Switched to provider ${providerId}.${suffix} Run /model list to pick a model, or /provider to switch again.`,
-        });
-        return;
-      }
+      const savedModels = getProviderModels(providerId).length;
+      const next =
+        savedModels > 0
+          ? 'Pick a model and its token settings below.'
+          : 'Its model list is being fetched; pick a model and its token settings below.';
       historyManager.addItem({
         type: MessageType.INFO,
-        text: `Switched to provider ${providerId}.${suffix} It has no default model, so pick one from the list below.`,
+        text: `Switched to provider ${providerId}.${suffix} ${next}`,
       });
       openModelDialog(config.getContentGeneratorConfig()?.baseUrl);
     },
