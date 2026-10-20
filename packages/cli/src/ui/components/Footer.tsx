@@ -39,6 +39,19 @@ import { paginateFooterColumns } from '../utils/paginateFooterColumns.js';
 
 const HOSTNAME = os.hostname();
 
+/**
+ * Formats a token count the way the footer shows it: compact notation, at most
+ * one fractional digit, lowercase suffix (e.g. `1.5k`, `262k`).
+ */
+function formatCompactCount(count: number): string {
+  return new Intl.NumberFormat('en-US', {
+    notation: 'compact',
+    maximumFractionDigits: 1,
+  })
+    .format(count)
+    .toLowerCase();
+}
+
 /** How long each footer page is shown before auto-advancing to the next. */
 const FOOTER_PAGE_INTERVAL_MS = 5000;
 
@@ -479,11 +492,7 @@ export const Footer: React.FC = () => {
         for (const m of Object.values(uiState.sessionStats.metrics.models))
           total += m.tokens.total;
         if (total > 0) {
-          const formatter = new Intl.NumberFormat('en-US', {
-            notation: 'compact',
-            maximumFractionDigits: 1,
-          });
-          const formatted = formatter.format(total).toLowerCase();
+          const formatted = formatCompactCount(total);
           addCol(
             id,
             header,
@@ -500,14 +509,16 @@ export const Footer: React.FC = () => {
           cached += m.tokens.cached;
           prompt += m.tokens.prompt;
         }
-        const rate = prompt > 0 ? Math.round((cached / prompt) * 100) : 0;
-        const formatted = `${rate}% cached`;
-        addCol(
-          id,
-          header,
-          () => <Text color={itemColor}>{formatted}</Text>,
-          formatted.length,
-        );
+        if (prompt > 0) {
+          const rate = Math.round((cached / prompt) * 100);
+          const formatted = `${rate}% ~${formatCompactCount(cached)} / ${formatCompactCount(prompt)}`;
+          addCol(
+            id,
+            header,
+            () => <Text color={itemColor}>{formatted}</Text>,
+            formatted.length,
+          );
+        }
         break;
       }
       default:
