@@ -5,7 +5,7 @@
  */
 
 /**
- * Fetches the model ids an OpenAI-compatible endpoint serves.
+ * Fetches the models an OpenAI-compatible endpoint serves.
  *
  * Kept out of the slash command and the dialog so both share one path: the
  * command needs it to decide whether a listing exists, and the dialog needs it
@@ -20,13 +20,15 @@ import {
   isOpenAiProviderBackend,
   OpenAICompatibleClient,
   type Config,
+  type RemoteModel,
 } from '@google/gemini-cli-core';
 
 /** How long to wait for the listing before giving up on it. */
 const LIST_TIMEOUT_MS = 20_000;
 
 export interface RemoteModelListing {
-  models: string[];
+  /** The served models, in the order the endpoint listed them. */
+  models: RemoteModel[];
   /** The endpoint the list came from, for display. */
   endpoint: string;
 }

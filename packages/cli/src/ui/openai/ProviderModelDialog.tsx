@@ -30,6 +30,7 @@ import {
   parseTokenCount,
   saveProviderModelSettings,
   type OpenAiProviderModel,
+  type RemoteModel,
 } from '@google/gemini-cli-core';
 import { useConfig } from '../contexts/ConfigContext.js';
 import { useKeypress } from '../hooks/useKeypress.js';
@@ -78,19 +79,47 @@ function parseTokenField(raw: string): number | undefined | 'invalid' {
   return parseTokenCount(trimmed);
 }
 
+/** The label shown for each token setting, in display order. */
+const TOKEN_FIELDS = [
+  { field: 'contextWindowSize', label: 'context' },
+  { field: 'maxToken', label: 'max output' },
+] as const;
+
+function formatTokens(value: number): string {
+  return value.toLocaleString('en-US');
+}
+
+/**
+ * Summarises one model's token settings for the list.
+ *
+ * When the endpoint advertises a different number than the one saved, both are
+ * shown. Silently preferring either would hide a real disagreement: the saved
+ * value is what the session uses, but the endpoint is the more recent claim, and
+ * only the user can say which is right for them.
+ */
 function describeModel(
   model: OpenAiProviderModel,
   currentModel: string | undefined,
+  reported?: RemoteModel,
 ): string {
   const parts: string[] = [];
   if (model.modelId === currentModel) {
     parts.push('current model');
   }
-  if (model.contextWindowSize !== undefined) {
-    parts.push(`context ${model.contextWindowSize.toLocaleString('en-US')}`);
-  }
-  if (model.maxToken !== undefined) {
-    parts.push(`max output ${model.maxToken.toLocaleString('en-US')}`);
+  for (const { field, label } of TOKEN_FIELDS) {
+    const saved = model[field];
+    const advertised = reported?.[field];
+    if (saved !== undefined) {
+      parts.push(
+        advertised !== undefined && advertised !== saved
+          ? `${label} ${formatTokens(saved)} (endpoint: ${formatTokens(advertised)})`
+          : `${label} ${formatTokens(saved)}`,
+      );
+      continue;
+    }
+    if (advertised !== undefined) {
+      parts.push(`${label} ${formatTokens(advertised)} (from endpoint)`);
+    }
   }
   return parts.length > 0 ? parts.join(' · ') : 'no token settings';
 }
@@ -106,6 +135,12 @@ export function ProviderModelDialog({
     [providerId],
   );
   const [models, setModels] = useState<OpenAiProviderModel[]>(initialModels);
+  // What the endpoint claimed, kept beside the saved values rather than merged
+  // into them: the number the session uses stays the saved one, and the claim
+  // is only ever displayed.
+  const [reported, setReported] = useState<Map<string, RemoteModel>>(
+    () => new Map(),
+  );
   const [phase, setPhase] = useState<Phase>(() =>
     initialModels.length > 0 ? { status: 'source' } : { status: 'loading' },
   );
@@ -139,14 +174,13 @@ export function ProviderModelDialog({
           });
           return;
         }
+        setReported(
+          new Map(listing.models.map((model) => [model.modelId, model])),
+        );
         const saved = mergeProviderModels(providerId, listing.models);
         // Read back rather than reusing `listing` so the token settings already
         // saved for these models are displayed.
-        setModels(
-          saved
-            ? getProviderModels(providerId)
-            : listing.models.map((modelId) => ({ modelId })),
-        );
+        setModels(saved ? getProviderModels(providerId) : listing.models);
         setPhase({ status: 'list' });
         if (!saved) {
           setNotice(
@@ -263,7 +297,11 @@ export function ProviderModelDialog({
         key: model.modelId,
         value: model.modelId,
         title: model.modelId,
-        description: describeModel(model, currentModel),
+        description: describeModel(
+          model,
+          currentModel,
+          reported.get(model.modelId),
+        ),
       })),
       {
         key: REFRESH_ITEM,
@@ -272,7 +310,7 @@ export function ProviderModelDialog({
         description: `Ask ${endpoint} and merge the result`,
       },
     ];
-  }, [models, filter, currentModel, endpoint]);
+  }, [models, filter, currentModel, endpoint, reported]);
 
   const handleSourceSelect = useCallback(
     (value: string) => {
@@ -489,6 +527,9 @@ export function ProviderModelDialog({
   if (phase.status === 'settings') {
     const step = phase.step;
     const isLastStep = step === 'maxToken';
+    const reportedTokenValue = reported.get(phase.modelId)?.[
+      isLastStep ? 'maxToken' : 'contextWindowSize'
+    ];
     return (
       <Box
         borderStyle="round"
@@ -506,6 +547,12 @@ export function ProviderModelDialog({
               ? 'The most output tokens to request from this model, e.g. 8192 or 8k. Leave empty to keep the saved value.'
               : 'The real context window of this model in tokens, e.g. 131072 or 128k. Leave empty to keep the saved value.'}
           </Text>
+          {reportedTokenValue !== undefined && (
+            <Text color={theme.text.secondary}>
+              {endpoint} reports {formatTokens(reportedTokenValue)} for this
+              model.
+            </Text>
+          )}
         </Box>
         <Box
           marginTop={1}

@@ -75,9 +75,15 @@ describe('fetchRemoteModels', () => {
 
   it('lists models from the configured endpoint', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ data: [{ id: 'a' }, { id: 'b' }] }), {
-        status: 200,
-      }),
+      new Response(
+        JSON.stringify({
+          data: [
+            { id: 'a', context_length: 128_000, max_completion_tokens: 4_096 },
+            { id: 'b' },
+          ],
+        }),
+        { status: 200 },
+      ),
     );
     vi.stubGlobal('fetch', fetchMock);
 
@@ -89,8 +95,12 @@ describe('fetchRemoteModels', () => {
       }),
     );
 
+    // The listing carries the limits the endpoint advertises, not just ids.
     expect(result).toEqual({
-      models: ['a', 'b'],
+      models: [
+        { modelId: 'a', contextWindowSize: 128_000, maxToken: 4_096 },
+        { modelId: 'b' },
+      ],
       endpoint: 'https://openrouter.ai/api/v1',
     });
     expect(fetchMock.mock.calls[0][0]).toBe(

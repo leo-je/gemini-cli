@@ -451,18 +451,21 @@ describe('parseModelList', () => {
           data: [{ id: 'a' }, { id: 'b' }],
         }),
       ),
-    ).toEqual(['a', 'b']);
+    ).toEqual([{ modelId: 'a' }, { modelId: 'b' }]);
   });
 
   it('reads the {models:[...]} shape a local proxy answers with', () => {
     expect(parseModelList(JSON.stringify({ models: ['x', 'y'] }))).toEqual([
-      'x',
-      'y',
+      { modelId: 'x' },
+      { modelId: 'y' },
     ]);
   });
 
   it('reads a bare array of ids', () => {
-    expect(parseModelList(JSON.stringify(['x', 'y']))).toEqual(['x', 'y']);
+    expect(parseModelList(JSON.stringify(['x', 'y']))).toEqual([
+      { modelId: 'x' },
+      { modelId: 'y' },
+    ]);
   });
 
   it('falls back through the naming fields gateways disagree on', () => {
@@ -478,13 +481,27 @@ describe('parseModelList', () => {
           ],
         }),
       ),
-    ).toEqual(['first', 'second', 'third', 'fourth', 'fifth']);
+    ).toEqual([
+      { modelId: 'first' },
+      { modelId: 'second' },
+      { modelId: 'third' },
+      { modelId: 'fourth' },
+      { modelId: 'fifth' },
+    ]);
   });
 
-  it('deduplicates ids', () => {
+  it('deduplicates ids, keeping numbers a duplicate supplies', () => {
     expect(
-      parseModelList(JSON.stringify({ data: [{ id: 'a' }, { id: 'a' }] })),
-    ).toEqual(['a']);
+      parseModelList(
+        JSON.stringify({
+          data: [
+            { id: 'a' },
+            { id: 'a', context_length: 200000 },
+            { id: 'a', context_length: 123 },
+          ],
+        }),
+      ),
+    ).toEqual([{ modelId: 'a', contextWindowSize: 200000 }]);
   });
 
   it('skips entries that name no model', () => {
@@ -492,7 +509,86 @@ describe('parseModelList', () => {
       parseModelList(
         JSON.stringify({ data: [{ id: 'a' }, {}, null, 42, { id: '' }] }),
       ),
-    ).toEqual(['a']);
+    ).toEqual([{ modelId: 'a' }]);
+  });
+
+  it('reads the token limits OpenRouter publishes per route', () => {
+    // OpenRouter repeats the window at top level and under `top_provider`, and
+    // the route's own number is the binding one.
+    expect(
+      parseModelList(
+        JSON.stringify({
+          data: [
+            {
+              id: 'vendor/model',
+              context_length: 1048576,
+              top_provider: {
+                context_length: 262144,
+                max_completion_tokens: 8192,
+              },
+            },
+          ],
+        }),
+      ),
+    ).toEqual([
+      { modelId: 'vendor/model', contextWindowSize: 262144, maxToken: 8192 },
+    ]);
+  });
+
+  it('reads the limits other dialects name differently', () => {
+    const cases: Array<Record<string, unknown>> = [
+      { id: 'vllm', max_model_len: 32768 },
+      { id: 'gemini', inputTokenLimit: 1048576, outputTokenLimit: 65536 },
+      { id: 'llamacpp', n_ctx: 8192 },
+      { id: 'gateway', context_window: 128000, max_output_tokens: 4096 },
+      { id: 'nested', limits: { context_length: 64000 } },
+    ];
+    expect(parseModelList(JSON.stringify({ data: cases }))).toStrictEqual([
+      { modelId: 'vllm', contextWindowSize: 32768 },
+      { modelId: 'gemini', contextWindowSize: 1048576, maxToken: 65536 },
+      { modelId: 'llamacpp', contextWindowSize: 8192 },
+      { modelId: 'gateway', contextWindowSize: 128000, maxToken: 4096 },
+      { modelId: 'nested', contextWindowSize: 64000 },
+    ]);
+  });
+
+  it('accepts counts written as strings, with the k/m shorthand', () => {
+    expect(
+      parseModelList(
+        JSON.stringify({ data: [{ id: 'a', context_length: '128k' }] }),
+      ),
+    ).toEqual([{ modelId: 'a', contextWindowSize: 131072 }]);
+  });
+
+  it('drops an output cap that is not below the window', () => {
+    // A cap at or above the context window is a schema mismatch; sending it as
+    // max_tokens would silently truncate the reply budget instead of helping.
+    expect(
+      parseModelList(
+        JSON.stringify({
+          data: [
+            { id: 'a', context_length: 8192, max_completion_tokens: 8192 },
+          ],
+        }),
+      ),
+    ).toEqual([{ modelId: 'a', contextWindowSize: 8192 }]);
+  });
+
+  it('ignores numbers that cannot be token counts', () => {
+    expect(
+      parseModelList(
+        JSON.stringify({
+          data: [
+            {
+              id: 'a',
+              context_length: -1,
+              max_completion_tokens: 'unbounded',
+            },
+            { id: 'b', context_length: 1e12 },
+          ],
+        }),
+      ),
+    ).toEqual([{ modelId: 'a' }, { modelId: 'b' }]);
   });
 
   it('reports a body with no recognisable list rather than returning empty', () => {
@@ -530,7 +626,7 @@ describe('listModels', () => {
       apiKey: 'k',
     }).listModels();
 
-    expect(models).toEqual(['a', 'b']);
+    expect(models).toEqual([{ modelId: 'a' }, { modelId: 'b' }]);
     expect(fetchMock.mock.calls[0][0]).toBe(
       'https://openrouter.ai/api/v1/models',
     );

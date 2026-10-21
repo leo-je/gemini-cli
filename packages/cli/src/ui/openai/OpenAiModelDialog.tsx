@@ -56,7 +56,10 @@ export function OpenAiModelDialog({
           });
           return;
         }
-        setState({ status: 'ready', models: listing.models });
+        setState({
+          status: 'ready',
+          models: listing.models.map((model) => model.modelId),
+        });
       })
       .catch((err: unknown) => {
         if (cancelled) return;

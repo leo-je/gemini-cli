@@ -145,7 +145,7 @@ describe('ProviderModelDialog', () => {
   it('fetches the catalog when the provider has no saved models', async () => {
     seedProvider();
     mockedFetchRemoteModels.mockResolvedValue({
-      models: ['m1', 'm2'],
+      models: [{ modelId: 'm1' }, { modelId: 'm2' }],
       endpoint: ENDPOINT,
     });
 
@@ -161,6 +161,34 @@ describe('ProviderModelDialog', () => {
     expect(readProviderDocument().providers[0].models).toEqual([
       { modelId: 'm1' },
       { modelId: 'm2' },
+    ]);
+    unmount();
+  });
+
+  it('shows the number the endpoint reports without replacing the saved one', async () => {
+    seedProvider([{ modelId: 'm1', contextWindowSize: 131_072 }]);
+    mockedFetchRemoteModels.mockResolvedValue({
+      models: [{ modelId: 'm1', contextWindowSize: 262_144 }],
+      endpoint: ENDPOINT,
+    });
+
+    const { lastFrame, stdin, waitUntilReady, unmount } = await renderDialog();
+    await waitUntilReady();
+
+    // "Fetch model list" is the second source option.
+    await act(async () => {
+      stdin.write('\u001b[B');
+    });
+    await waitUntilReady();
+    await act(async () => {
+      stdin.write('\r');
+    });
+
+    await vi.waitFor(() => expect(lastFrame()).toContain('262,144'));
+    // Both numbers are visible, and the saved one is what stays in the file.
+    expect(lastFrame()).toContain('131,072');
+    expect(readProviderDocument().providers[0].models).toEqual([
+      { modelId: 'm1', contextWindowSize: 131_072 },
     ]);
     unmount();
   });
