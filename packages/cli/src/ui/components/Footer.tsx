@@ -508,7 +508,9 @@ export const Footer: React.FC = () => {
       }
       case 'cache-hit': {
         const { cached, prompt } = sessionTokens;
-        if (prompt > 0) {
+        // Hide until there is at least one hit: a permanent `0% ~0 / N` while
+        // the first requests are still populating the cache is just noise.
+        if (cached > 0) {
           const rate = Math.round((cached / prompt) * 100);
           const formatted = `${rate}% ~${formatCompactCount(cached)} / ${formatCompactCount(prompt)}`;
           addCol(

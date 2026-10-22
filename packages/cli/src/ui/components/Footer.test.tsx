@@ -694,6 +694,14 @@ describe('<Footer />', () => {
       expect(output).not.toContain('%');
       unmount();
     });
+
+    it('stays hidden while requests have not produced any cache hit yet', async () => {
+      const { lastFrame, unmount } = await renderWithCache(0, 19800);
+      const output = lastFrame({ allowEmpty: true }) ?? '';
+      expect(output).not.toContain('cache');
+      expect(output).not.toContain('%');
+      unmount();
+    });
   });
 
   describe('Footer token columns', () => {

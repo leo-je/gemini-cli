@@ -70,7 +70,8 @@ export const ALL_ITEMS = [
   {
     id: 'cache-hit',
     header: 'cache',
-    description: 'Prompt cache hit rate for the session',
+    description:
+      'Prompt cache hit rate for the session (not shown until there are cache hits)',
   },
 ] as const;
 
