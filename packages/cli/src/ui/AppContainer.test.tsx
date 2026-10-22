@@ -266,6 +266,17 @@ import {
   EXPAND_HINT_DURATION_MS,
 } from './constants.js';
 
+// In the default inline mode, refreshStatic must only clear the visible
+// viewport. It must never emit `\x1b[3J` (Erase Saved Lines), which purges the
+// terminal's native scrollback history.
+const CLEAR_VIEWPORT = ansiEscapes.eraseScreen + ansiEscapes.cursorTo(0, 0);
+const ERASE_SCROLLBACK = '\x1b[3J';
+
+const getScrollbackPurgingWrites = () =>
+  mocks.mockStdout.write.mock.calls.filter((call: unknown[]) =>
+    String(call[0]).includes(ERASE_SCROLLBACK),
+  );
+
 describe('AppContainer State Management', () => {
   let mockConfig: Config;
   let mockSettings: LoadedSettings;
@@ -3367,12 +3378,12 @@ describe('AppContainer State Management', () => {
         await new Promise((resolve) => setTimeout(resolve, 100));
       });
 
-      // Check that clearTerminal was NOT written to stdout
-      const clearTerminalCalls = mocks.mockStdout.write.mock.calls.filter(
-        (call: unknown[]) => call[0] === ansiEscapes.clearTerminal,
+      // Check that refreshStatic did NOT clear the viewport
+      const clearViewportCalls = mocks.mockStdout.write.mock.calls.filter(
+        (call: unknown[]) => call[0] === CLEAR_VIEWPORT,
       );
 
-      expect(clearTerminalCalls).toHaveLength(0);
+      expect(clearViewportCalls).toHaveLength(0);
       unmount();
     });
 
@@ -3416,9 +3427,7 @@ describe('AppContainer State Management', () => {
         act(() => {
           vi.advanceTimersByTime(100);
         });
-        expect(mocks.mockStdout.write).not.toHaveBeenCalledWith(
-          ansiEscapes.clearTerminal,
-        );
+        expect(mocks.mockStdout.write).not.toHaveBeenCalledWith(CLEAR_VIEWPORT);
         expect(capturedUIState.historyRemountKey).toBe(initialRemountKey);
 
         // Simulate height-only resize (e.g. mobile virtual keyboard toggle)
@@ -3429,9 +3438,7 @@ describe('AppContainer State Management', () => {
         act(() => {
           vi.advanceTimersByTime(100);
         });
-        expect(mocks.mockStdout.write).not.toHaveBeenCalledWith(
-          ansiEscapes.clearTerminal,
-        );
+        expect(mocks.mockStdout.write).not.toHaveBeenCalledWith(CLEAR_VIEWPORT);
         expect(capturedUIState.historyRemountKey).toBe(initialRemountKey);
 
         // Simulate rapid consecutive horizontal resizes (columns: 80 -> 70 -> 60)
@@ -3442,9 +3449,7 @@ describe('AppContainer State Management', () => {
         act(() => {
           vi.advanceTimersByTime(60);
         });
-        expect(mocks.mockStdout.write).not.toHaveBeenCalledWith(
-          ansiEscapes.clearTerminal,
-        );
+        expect(mocks.mockStdout.write).not.toHaveBeenCalledWith(CLEAR_VIEWPORT);
 
         // Second resize before 100ms elapses should reset the debounce timer
         mockedUseTerminalSize.mockReturnValue({ columns: 60, rows: 16 });
@@ -3454,18 +3459,14 @@ describe('AppContainer State Management', () => {
         act(() => {
           vi.advanceTimersByTime(60);
         });
-        expect(mocks.mockStdout.write).not.toHaveBeenCalledWith(
-          ansiEscapes.clearTerminal,
-        );
+        expect(mocks.mockStdout.write).not.toHaveBeenCalledWith(CLEAR_VIEWPORT);
         expect(capturedUIState.historyRemountKey).toBe(initialRemountKey);
 
         // Remaining 40ms completes the 100ms debounce from the last width change
         act(() => {
           vi.advanceTimersByTime(40);
         });
-        expect(mocks.mockStdout.write).toHaveBeenCalledWith(
-          ansiEscapes.clearTerminal,
-        );
+        expect(mocks.mockStdout.write).toHaveBeenCalledWith(CLEAR_VIEWPORT);
         expect(capturedUIState.historyRemountKey).toBe(initialRemountKey + 1);
 
         unmount();
@@ -3596,7 +3597,7 @@ describe('AppContainer State Management', () => {
           vi.advanceTimersByTime(100);
         });
 
-        // Intermediate buffered frame should have been discarded before clearTerminal,
+        // Intermediate buffered frame should have been discarded before the viewport clear,
         // truncating buffered to startIndex (1) and preserving in-flight write state
         expect(inFlightCallback).not.toHaveBeenCalled();
         expect(bufferedCallback).toHaveBeenCalledWith(null);
@@ -3605,19 +3606,20 @@ describe('AppContainer State Management', () => {
         expect(writableState.length).toBe(10);
         expect(writableState.writelen).toBe(10);
 
-        // clearTerminal should be wrapped in DEC Synchronized Output (\x1b[?2026h ... \x1b[?2026l) and uncorked in useLayoutEffect
+        // The viewport clear should be wrapped in DEC Synchronized Output (\x1b[?2026h ... \x1b[?2026l) and uncorked in useLayoutEffect
         expect(mocks.mockStdout.write).toHaveBeenNthCalledWith(
           1,
           '\x1b[?2026h',
         );
         expect(mocks.mockStdout.write).toHaveBeenNthCalledWith(
           2,
-          ansiEscapes.clearTerminal,
+          CLEAR_VIEWPORT,
         );
         expect(mocks.mockStdout.write).toHaveBeenNthCalledWith(
           3,
           '\x1b[?2026l',
         );
+        expect(getScrollbackPurgingWrites()).toHaveLength(0);
         expect(mockStdoutWithCork.uncork).toHaveBeenCalledTimes(1);
         expect(writableState.corked).toBe(0);
 
@@ -3631,6 +3633,33 @@ describe('AppContainer State Management', () => {
         delete mockStdoutWithCork._writableState;
         vi.useRealTimers();
       }
+    });
+
+    it('refreshStatic clears only the viewport and preserves terminal scrollback in default inline mode', async () => {
+      vi.spyOn(mockConfig, 'getUseTerminalBuffer').mockReturnValue(false);
+      vi.spyOn(mockConfig, 'getUseAlternateBuffer').mockReturnValue(false);
+
+      const { unmount } = await act(async () => renderAppContainer());
+      expect(capturedUIActions).toBeTruthy();
+
+      const initialRemountKey = capturedUIState.historyRemountKey;
+      mocks.mockStdout.write.mockClear();
+
+      act(() => {
+        capturedUIActions.refreshStatic();
+      });
+
+      // Only the visible viewport is erased so earlier turns remain available
+      // in the terminal's native scrollback.
+      expect(mocks.mockStdout.write).toHaveBeenCalledWith(CLEAR_VIEWPORT);
+      expect(mocks.mockStdout.write).not.toHaveBeenCalledWith(
+        ansiEscapes.clearTerminal,
+      );
+      expect(getScrollbackPurgingWrites()).toHaveLength(0);
+      // Static history is still remounted so it is re-rendered after the clear.
+      expect(capturedUIState.historyRemountKey).toBe(initialRemountKey + 1);
+
+      unmount();
     });
   });
 
@@ -3696,10 +3725,8 @@ describe('AppContainer State Management', () => {
 
       // Should be reset
       expect(capturedUIState.constrainHeight).toBe(true);
-      // Should NOT refresh static's clearTerminal in alternate buffer
-      expect(mocks.mockStdout.write).not.toHaveBeenCalledWith(
-        ansiEscapes.clearTerminal,
-      );
+      // Should NOT refresh static's viewport clear in alternate buffer
+      expect(mocks.mockStdout.write).not.toHaveBeenCalledWith(CLEAR_VIEWPORT);
       unmount();
     });
   });
@@ -3969,9 +3996,7 @@ describe('AppContainer State Management', () => {
 
       // Should remain expanded and not clear terminal
       expect(capturedUIState.constrainHeight).toBe(false);
-      expect(mocks.mockStdout.write).not.toHaveBeenCalledWith(
-        ansiEscapes.clearTerminal,
-      );
+      expect(mocks.mockStdout.write).not.toHaveBeenCalledWith(CLEAR_VIEWPORT);
 
       // Simulate Escape key to exit expanded view
       act(() => {
@@ -4042,9 +4067,7 @@ describe('AppContainer State Management', () => {
       });
 
       expect(capturedUIState.constrainHeight).toBe(false);
-      expect(mocks.mockStdout.write).not.toHaveBeenCalledWith(
-        ansiEscapes.clearTerminal,
-      );
+      expect(mocks.mockStdout.write).not.toHaveBeenCalledWith(CLEAR_VIEWPORT);
 
       // Collapse with Ctrl+O should still refresh static and clear terminal
       act(() => {
@@ -4052,9 +4075,7 @@ describe('AppContainer State Management', () => {
       });
 
       expect(capturedUIState.constrainHeight).toBe(true);
-      expect(mocks.mockStdout.write).toHaveBeenCalledWith(
-        ansiEscapes.clearTerminal,
-      );
+      expect(mocks.mockStdout.write).toHaveBeenCalledWith(CLEAR_VIEWPORT);
 
       unmount();
     });
@@ -4093,9 +4114,7 @@ describe('AppContainer State Management', () => {
       });
 
       expect(capturedUIState.constrainHeight).toBe(false);
-      expect(mocks.mockStdout.write).toHaveBeenCalledWith(
-        ansiEscapes.clearTerminal,
-      );
+      expect(mocks.mockStdout.write).toHaveBeenCalledWith(CLEAR_VIEWPORT);
 
       unmount();
     });
