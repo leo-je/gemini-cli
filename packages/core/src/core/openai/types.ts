@@ -69,7 +69,19 @@ export interface OpenAIChatCompletionRequest {
   max_tokens?: number;
   stop?: string[];
   response_format?: Record<string, unknown>;
+  /**
+   * OpenAI's flat effort selector (`minimal` | `low` | `medium` | `high`), used
+   * by the o-series and GPT-5 families.
+   */
   reasoning_effort?: string;
+  /**
+   * OpenRouter's unified reasoning controls. OpenRouter translates this into
+   * whatever the routed vendor understands, and does not read the flat
+   * `reasoning_effort` field above.
+   */
+  reasoning?: {
+    effort?: string;
+  };
   stream?: boolean;
   stream_options?: { include_usage?: boolean };
 }

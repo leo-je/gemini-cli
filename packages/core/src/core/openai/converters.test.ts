@@ -7,13 +7,16 @@
 import {
   FinishReason,
   FunctionCallingConfigMode,
+  ThinkingLevel,
   type Content,
   type ContentListUnion,
   type Part,
 } from '@google/genai';
 import { describe, it, expect } from 'vitest';
 import {
+  applyReasoningConfig,
   buildGeminiResponse,
+  detectReasoningDialect,
   extractSystemText,
   normalizeContents,
   sanitizeJsonSchema,
@@ -25,6 +28,7 @@ import {
   toOpenAIMessages,
   toOpenAIRequest,
   toOpenAITools,
+  toReasoningEffort,
 } from './converters.js';
 
 const text = (value: string): Part => ({ text: value });
@@ -681,5 +685,117 @@ describe('toOpenAIEmbeddingRequest', () => {
         ],
       }),
     ).toEqual({ model: 'm', input: ['a', 'b'] });
+  });
+});
+
+describe('detectReasoningDialect', () => {
+  it('recognises OpenRouter by hostname', () => {
+    expect(detectReasoningDialect('https://openrouter.ai/api/v1')).toBe(
+      'openrouter',
+    );
+    expect(detectReasoningDialect('https://api.openrouter.ai/v1')).toBe(
+      'openrouter',
+    );
+  });
+
+  it('treats other endpoints as the OpenAI dialect', () => {
+    expect(detectReasoningDialect('https://api.openai.com/v1')).toBe('openai');
+    // A lookalike host must not be mistaken for OpenRouter.
+    expect(detectReasoningDialect('https://notopenrouter.ai/v1')).toBe(
+      'openai',
+    );
+    expect(detectReasoningDialect('http://localhost:11434/v1')).toBe('openai');
+  });
+
+  it('falls back to the OpenAI dialect for an unusable base URL', () => {
+    expect(detectReasoningDialect('')).toBe('openai');
+    expect(detectReasoningDialect('not a url')).toBe('openai');
+  });
+});
+
+describe('toReasoningEffort', () => {
+  it('sends nothing when the request carries no thinking config', () => {
+    expect(toReasoningEffort(undefined)).toBeUndefined();
+    expect(toReasoningEffort({ includeThoughts: true })).toBeUndefined();
+  });
+
+  it('maps the discrete thinking levels onto effort buckets', () => {
+    expect(toReasoningEffort({ thinkingLevel: ThinkingLevel.HIGH })).toBe(
+      'high',
+    );
+    expect(toReasoningEffort({ thinkingLevel: ThinkingLevel.LOW })).toBe('low');
+    expect(
+      toReasoningEffort({
+        thinkingLevel: ThinkingLevel.THINKING_LEVEL_UNSPECIFIED,
+      }),
+    ).toBeUndefined();
+  });
+
+  it('treats -1 (automatic) as "send nothing"', () => {
+    expect(toReasoningEffort({ thinkingBudget: -1 })).toBeUndefined();
+  });
+
+  it('buckets an explicit token budget', () => {
+    expect(toReasoningEffort({ thinkingBudget: 0 })).toBe('minimal');
+    expect(toReasoningEffort({ thinkingBudget: 2_048 })).toBe('low');
+    expect(toReasoningEffort({ thinkingBudget: 8_192 })).toBe('medium');
+    expect(toReasoningEffort({ thinkingBudget: 32_768 })).toBe('high');
+  });
+
+  it('prefers the thinking level over the token budget', () => {
+    expect(
+      toReasoningEffort({
+        thinkingLevel: ThinkingLevel.LOW,
+        thinkingBudget: 32_768,
+      }),
+    ).toBe('low');
+  });
+});
+
+describe('applyReasoningConfig', () => {
+  const body = () =>
+    toOpenAIRequest({ model: 'gemini-3-pro', contents: [] }, 'gpt-5', false);
+  const highEffort = { thinkingConfig: { thinkingLevel: ThinkingLevel.HIGH } };
+
+  it('uses the flat field for the OpenAI dialect', () => {
+    const request = body();
+    applyReasoningConfig(
+      request,
+      highEffort,
+      'gpt-5',
+      'https://api.openai.com/v1',
+    );
+    expect(request.reasoning_effort).toBe('high');
+    expect(request.reasoning).toBeUndefined();
+  });
+
+  it('uses the unified field for OpenRouter', () => {
+    const request = body();
+    applyReasoningConfig(
+      request,
+      highEffort,
+      'openai/gpt-5',
+      'https://openrouter.ai/api/v1',
+    );
+    expect(request.reasoning).toEqual({ effort: 'high' });
+    expect(request.reasoning_effort).toBeUndefined();
+  });
+
+  it('leaves ordinary models alone', () => {
+    const request = body();
+    applyReasoningConfig(
+      request,
+      highEffort,
+      'gpt-4o',
+      'https://api.openai.com/v1',
+    );
+    expect(request.reasoning_effort).toBeUndefined();
+    expect(request.reasoning).toBeUndefined();
+  });
+
+  it('sends nothing when no effort was configured', () => {
+    const request = body();
+    applyReasoningConfig(request, {}, 'gpt-5', 'https://api.openai.com/v1');
+    expect(request.reasoning_effort).toBeUndefined();
   });
 });

@@ -38,6 +38,7 @@ import {
   parseSseStream,
 } from './openaiClient.js';
 import {
+  applyReasoningConfig,
   buildGeminiResponse,
   normalizeContents,
   toGeminiFinishReason,
@@ -108,11 +109,18 @@ export class OpenAIContentGenerator implements ContentGenerator {
    * token overrides; `undefined` for a single-endpoint configuration.
    */
   private readonly providerId: string | undefined;
+  /**
+   * The endpoint this generator talks to. Kept because reasoning controls are
+   * spelled differently per endpoint and the request body has to be built the
+   * way the endpoint expects; see `applyReasoningConfig`.
+   */
+  private readonly baseUrl: string;
 
   constructor(config: ContentGeneratorConfig, gcConfig: Config) {
     this.gcConfig = gcConfig;
     this.providerId = config.providerId;
     this.configModelId = config.modelId;
+    this.baseUrl = config.baseUrl ?? '';
     this.configuredModelId = readEnvWithFallback(
       OPENAI_MODEL_ID_ENV,
       OPENAI_MODEL_ID_FALLBACK_ENV,
@@ -124,7 +132,7 @@ export class OpenAIContentGenerator implements ContentGenerator {
       readEnvValue(OPENAI_HEADERS_ENV, gcConfig.env),
     );
     this.client = new OpenAICompatibleClient({
-      baseUrl: config.baseUrl ?? '',
+      baseUrl: this.baseUrl,
       apiKey: config.apiKey ?? '',
       proxy: config.proxy,
       headers: { ...config.customHeaders, ...configuredHeaders },
@@ -205,6 +213,7 @@ export class OpenAIContentGenerator implements ContentGenerator {
     const modelId = this.resolveModelId();
     const body = toOpenAIRequest(request, modelId, false);
     this.applyConfiguredMaxOutputTokens(body, modelId);
+    applyReasoningConfig(body, request.config, modelId, this.baseUrl);
     if (this.gcConfig.getOpenAiOpencodeHeaders?.()) {
       // The free lane checks for agent-shaped tools; see opencode/body.ts.
       ensureOpencodeFreeLaneShape(body);
@@ -230,6 +239,7 @@ export class OpenAIContentGenerator implements ContentGenerator {
     const modelId = this.resolveModelId();
     const body = toOpenAIRequest(request, modelId, true);
     this.applyConfiguredMaxOutputTokens(body, modelId);
+    applyReasoningConfig(body, request.config, modelId, this.baseUrl);
     if (this.gcConfig.getOpenAiOpencodeHeaders?.()) {
       // The free lane checks for agent-shaped tools; see opencode/body.ts.
       ensureOpencodeFreeLaneShape(body);

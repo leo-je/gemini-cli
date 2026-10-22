@@ -15,14 +15,17 @@
 import {
   FinishReason,
   GenerateContentResponse,
+  ThinkingLevel,
   type Content,
   type ContentListUnion,
   type ContentUnion,
   type EmbedContentParameters,
   type FunctionDeclaration,
+  type GenerateContentConfig,
   type GenerateContentParameters,
   type GenerateContentResponseUsageMetadata,
   type Part,
+  type ThinkingConfig,
   type ToolConfig,
   type ToolUnion,
 } from '@google/genai';
@@ -438,6 +441,124 @@ export function usesDeveloperRole(modelId: string): boolean {
 
 function supportsSamplingParameters(modelId: string): boolean {
   return !matchesModelFamily(modelId, REASONING_MODEL_PREFIXES);
+}
+
+/**
+ * Model families that accept an explicit reasoning-effort selector.
+ *
+ * The o-series and GPT-5 are documented by OpenAI; Grok exposes the same knob
+ * through OpenRouter. Everything else either rejects the field outright (a
+ * `gpt-4o` request carrying `reasoning_effort` answers 400) or silently ignores
+ * it, so the selector is only ever sent for these.
+ */
+const REASONING_EFFORT_MODEL_PREFIXES = [...REASONING_MODEL_PREFIXES, 'grok'];
+
+/** Effort buckets, ordered from least to most reasoning. */
+export type ReasoningEffort = 'minimal' | 'low' | 'medium' | 'high';
+
+/**
+ * Thinking budgets that still land in each bucket.
+ *
+ * Gemini's budget is a token count and the selector is a bucket, so the mapping
+ * is lossy in one direction. The cutoffs follow the proportions OpenRouter
+ * documents for its effort levels (~10% / ~20% / ~50% / ~80% of the output
+ * budget) rather than an invented scale.
+ */
+const LOW_EFFORT_MAX_BUDGET = 4_096;
+const MEDIUM_EFFORT_MAX_BUDGET = 16_384;
+
+/** Which field an endpoint expects for reasoning controls. */
+export type ReasoningDialect = 'openai' | 'openrouter';
+
+const OPENROUTER_HOSTNAME = 'openrouter.ai';
+
+/**
+ * Picks the request dialect for reasoning controls from the endpoint URL.
+ *
+ * The URL is the only signal available at request time — a provider entry
+ * stores a base URL, not a vendor name. A proxy in front of OpenRouter is
+ * therefore treated as plain OpenAI, which is the safe direction: the fallback
+ * field (`reasoning_effort`) is the one every OpenAI-compatible endpoint is
+ * expected to tolerate, and an unknown field is a 400 on strict servers whereas
+ * a wrong-but-known field is usually ignored.
+ */
+export function detectReasoningDialect(baseUrl: string): ReasoningDialect {
+  try {
+    const hostname = new URL(baseUrl.trim()).hostname.toLowerCase();
+    if (
+      hostname === OPENROUTER_HOSTNAME ||
+      hostname.endsWith(`.${OPENROUTER_HOSTNAME}`)
+    ) {
+      return 'openrouter';
+    }
+  } catch {
+    // Empty or malformed base URL: fall through to the OpenAI dialect.
+  }
+  return 'openai';
+}
+
+/**
+ * Translates a Gemini thinking config into an OpenAI-style effort bucket.
+ *
+ * Returns `undefined` when nothing should be sent, which is the common case:
+ * an endpoint's own default is a better guess than ours, and switching
+ * reasoning on unasked would change latency and cost behind the user's back.
+ */
+export function toReasoningEffort(
+  thinkingConfig: ThinkingConfig | undefined,
+): ReasoningEffort | undefined {
+  const level = thinkingConfig?.thinkingLevel;
+  // `thinkingLevel` wins over `thinkingBudget` when both are present: it is the
+  // newer and more explicit signal, and the two are redundant by construction.
+  if (level === ThinkingLevel.HIGH) {
+    return 'high';
+  }
+  if (level === ThinkingLevel.LOW) {
+    return 'low';
+  }
+
+  const budget = thinkingConfig?.thinkingBudget;
+  if (budget === undefined || budget === -1) {
+    // -1 is "automatic", i.e. let the model decide — which is what omitting the
+    // field does. Sending a bucket would be a downgrade in expressiveness.
+    return undefined;
+  }
+  if (budget <= 0) {
+    return 'minimal';
+  }
+  if (budget <= LOW_EFFORT_MAX_BUDGET) {
+    return 'low';
+  }
+  if (budget <= MEDIUM_EFFORT_MAX_BUDGET) {
+    return 'medium';
+  }
+  return 'high';
+}
+
+/**
+ * Adds reasoning controls to a request body when one is warranted.
+ *
+ * Kept out of `toOpenAIRequest` because the dialect needs the endpoint URL,
+ * which the pure converter does not have.
+ */
+export function applyReasoningConfig(
+  body: OpenAIChatCompletionRequest,
+  config: GenerateContentConfig | undefined,
+  modelId: string,
+  baseUrl: string,
+): void {
+  if (!matchesModelFamily(modelId, REASONING_EFFORT_MODEL_PREFIXES)) {
+    return;
+  }
+  const effort = toReasoningEffort(config?.thinkingConfig);
+  if (!effort) {
+    return;
+  }
+  if (detectReasoningDialect(baseUrl) === 'openrouter') {
+    body.reasoning = { effort };
+    return;
+  }
+  body.reasoning_effort = effort;
 }
 
 /**
