@@ -360,13 +360,21 @@ export const ToolConfirmationMessage: React.FC<
       const hasModifiedBuildFiles =
         confirmationDetails.modifiedBuildFiles &&
         confirmationDetails.modifiedBuildFiles.length > 0;
-      if (isTrustedFolder && !hasUntrustedFlags && !hasModifiedBuildFiles) {
+      // Untrusted flags still allow a session-scoped approval: the shell tool
+      // remembers exactly the reviewed flags for the same root commands, so the
+      // user is not asked again for a command they already inspected. Modified
+      // build files keep hiding it, because that approval would silently cover
+      // files the user has not seen.
+      if (isTrustedFolder && !hasModifiedBuildFiles) {
         options.push({
           label: `Allow for this session`,
           value: ToolConfirmationOutcome.ProceedAlways,
           key: `Allow for this session`,
         });
-        if (allowPermanentApproval) {
+        // With untrusted flags the shell tool deliberately drops the persistent
+        // policy update, so offering to save it would promise something that
+        // never happens.
+        if (allowPermanentApproval && !hasUntrustedFlags) {
           options.push({
             label: `Allow this command for all future sessions`,
             value: ToolConfirmationOutcome.ProceedAlwaysAndSave,

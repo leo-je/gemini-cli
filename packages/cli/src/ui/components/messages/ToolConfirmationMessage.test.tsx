@@ -975,7 +975,10 @@ describe('ToolConfirmationMessage', () => {
       );
       expect(frame).toContain('--test_arg=malicious_flag');
       expect(frame).toContain('Allow once');
-      expect(frame).not.toContain('Allow for this session');
+      // Session approval only re-asks for flags the user has not reviewed yet,
+      // so it is safe to offer; the persistent variant is not, because the shell
+      // tool drops the policy update while untrusted flags are present.
+      expect(frame).toContain('Allow for this session');
       expect(frame).not.toContain('Allow this command for all future sessions');
       unmount();
     });
