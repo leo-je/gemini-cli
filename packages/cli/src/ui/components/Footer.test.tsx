@@ -12,6 +12,7 @@ import {
   type Config,
   UserAccountManager,
   AuthType,
+  LlmRole,
 } from '@google/gemini-cli-core';
 import path from 'node:path';
 
@@ -691,6 +692,120 @@ describe('<Footer />', () => {
       const output = lastFrame({ allowEmpty: true }) ?? '';
       expect(output).not.toContain('cache');
       expect(output).not.toContain('%');
+      unmount();
+    });
+  });
+
+  describe('Footer token columns', () => {
+    const roleMetrics = (prompt: number, cached: number, total: number) => ({
+      totalRequests: 1,
+      totalErrors: 0,
+      totalLatencyMs: 0,
+      tokens: {
+        input: 0,
+        prompt,
+        candidates: 0,
+        total,
+        cached,
+        thoughts: 0,
+        tool: 0,
+      },
+    });
+
+    // `aggregate` is what the model entry totals would be if everything in the
+    // process counted, background sub-agents included.
+    const renderWithRoles = async (
+      roleTotals: Partial<
+        Record<LlmRole, { prompt: number; cached: number; total: number }>
+      >,
+      aggregate: { prompt: number; cached: number; total: number },
+      items: string[],
+    ) => {
+      const roles: Partial<Record<LlmRole, ReturnType<typeof roleMetrics>>> =
+        {};
+      for (const [role, totals] of Object.entries(roleTotals)) {
+        if (!totals) continue;
+        roles[role as LlmRole] = roleMetrics(
+          totals.prompt,
+          totals.cached,
+          totals.total,
+        );
+      }
+
+      const result = await renderWithProviders(<Footer />, {
+        config: mockConfig,
+        width: 120,
+        uiState: {
+          sessionStats: {
+            ...mockSessionStats,
+            metrics: {
+              ...mockSessionStats.metrics,
+              models: {
+                'gemini-pro': {
+                  api: {
+                    totalRequests: 0,
+                    totalErrors: 0,
+                    totalLatencyMs: 0,
+                  },
+                  tokens: {
+                    input: 0,
+                    prompt: aggregate.prompt,
+                    candidates: 0,
+                    total: aggregate.total,
+                    cached: aggregate.cached,
+                    thoughts: 0,
+                    tool: 0,
+                  },
+                  roles,
+                },
+              },
+            },
+          },
+        },
+        settings: createMockSettings({
+          ui: {
+            footer: {
+              items,
+            },
+          },
+        }),
+      });
+      await result.waitUntilReady();
+      return result;
+    };
+
+    it('reports nothing when only a background sub-agent has been billed', async () => {
+      const { lastFrame, unmount } = await renderWithRoles(
+        {
+          [LlmRole.SUBAGENT]: { prompt: 943700, cached: 844700, total: 953300 },
+        },
+        { prompt: 943700, cached: 844700, total: 953300 },
+        ['token-count', 'cache-hit'],
+      );
+
+      const output = lastFrame({ allowEmpty: true }) ?? '';
+      expect(output).not.toContain('tokens');
+      expect(output).not.toContain('%');
+      unmount();
+    });
+
+    it('reports the session tokens and leaves the sub-agent out', async () => {
+      const { lastFrame, unmount } = await renderWithRoles(
+        {
+          [LlmRole.MAIN]: { prompt: 1000, cached: 500, total: 2000 },
+          [LlmRole.SUBAGENT]: {
+            prompt: 943700,
+            cached: 844700,
+            total: 953300,
+          },
+        },
+        { prompt: 944700, cached: 845200, total: 955300 },
+        ['token-count', 'cache-hit'],
+      );
+
+      const output = lastFrame() ?? '';
+      expect(output).toContain('2k tokens');
+      expect(output).toContain('50% ~500 / 1k');
       unmount();
     });
   });

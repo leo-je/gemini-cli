@@ -4,11 +4,51 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import { LlmRole } from '@google/gemini-cli-core';
 import type {
   SessionMetrics,
   ComputedSessionStats,
   ModelMetrics,
 } from '../contexts/SessionContext.js';
+
+/**
+ * Token totals for the work the user actually drove in this session.
+ *
+ * A model entry accumulates the whole process, background sub-agents included:
+ * the auto-memory extraction run starts with the CLI and burns hundreds of
+ * thousands of prompt tokens before the user types anything. Those tokens are
+ * real, but they are not this session's, and counting them made the footer
+ * report them as such. Requests made on behalf of the session itself — the main
+ * loop and the utility calls it triggers — are kept.
+ *
+ * Metrics restored from a resumed session carry no role breakdown at all, so an
+ * entry with no roles falls back to its bare totals.
+ */
+export function getSessionTokenTotals(metrics: SessionMetrics): {
+  prompt: number;
+  cached: number;
+  total: number;
+} {
+  const totals = { prompt: 0, cached: 0, total: 0 };
+
+  for (const model of Object.values(metrics.models)) {
+    if (Object.keys(model.roles).length === 0) {
+      totals.prompt += model.tokens.prompt;
+      totals.cached += model.tokens.cached;
+      totals.total += model.tokens.total;
+      continue;
+    }
+
+    for (const [role, roleMetrics] of Object.entries(model.roles)) {
+      if (role === LlmRole.SUBAGENT || !roleMetrics) continue;
+      totals.prompt += roleMetrics.tokens.prompt;
+      totals.cached += roleMetrics.tokens.cached;
+      totals.total += roleMetrics.tokens.total;
+    }
+  }
+
+  return totals;
+}
 
 export function calculateErrorRate(metrics: ModelMetrics): number {
   if (metrics.api.totalRequests === 0) {

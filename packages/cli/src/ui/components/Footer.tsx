@@ -36,6 +36,7 @@ import {
 } from '../../config/footerItems.js';
 import { isDevelopment } from '../../utils/installationInfo.js';
 import { paginateFooterColumns } from '../utils/paginateFooterColumns.js';
+import { getSessionTokenTotals } from '../utils/computeStats.js';
 
 const HOSTNAME = os.hostname();
 
@@ -285,6 +286,11 @@ export const Footer: React.FC = () => {
   const showLabels = settings.merged.ui.footer.showLabels !== false;
   const itemColor = showLabels ? theme.text.primary : theme.ui.comment;
 
+  // Background sub-agents (auto-memory extraction, etc.) share this process and
+  // therefore this metrics object; they are excluded so the token columns
+  // describe this session rather than everything the process has spent.
+  const sessionTokens = getSessionTokenTotals(uiState.sessionStats.metrics);
+
   const potentialColumns: FooterColumn[] = [];
 
   const addCol = (
@@ -488,9 +494,7 @@ export const Footer: React.FC = () => {
         break;
       }
       case 'token-count': {
-        let total = 0;
-        for (const m of Object.values(uiState.sessionStats.metrics.models))
-          total += m.tokens.total;
+        const { total } = sessionTokens;
         if (total > 0) {
           const formatted = formatCompactCount(total);
           addCol(
@@ -503,12 +507,7 @@ export const Footer: React.FC = () => {
         break;
       }
       case 'cache-hit': {
-        let cached = 0;
-        let prompt = 0;
-        for (const m of Object.values(uiState.sessionStats.metrics.models)) {
-          cached += m.tokens.cached;
-          prompt += m.tokens.prompt;
-        }
+        const { cached, prompt } = sessionTokens;
         if (prompt > 0) {
           const rate = Math.round((cached / prompt) * 100);
           const formatted = `${rate}% ~${formatCompactCount(cached)} / ${formatCompactCount(prompt)}`;

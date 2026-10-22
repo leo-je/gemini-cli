@@ -5,11 +5,13 @@
  */
 
 import { describe, it, expect } from 'vitest';
+import { LlmRole } from '@google/gemini-cli-core';
 import {
   calculateAverageLatency,
   calculateCacheHitRate,
   calculateErrorRate,
   computeSessionStats,
+  getSessionTokenTotals,
 } from './computeStats.js';
 import type {
   ModelMetrics,
@@ -308,5 +310,125 @@ describe('computeSessionStats', () => {
 
     expect(result.totalLinesAdded).toBe(42);
     expect(result.totalLinesRemoved).toBe(18);
+  });
+});
+
+describe('getSessionTokenTotals', () => {
+  const tokens = (prompt: number, cached: number, total: number) => ({
+    input: 0,
+    prompt,
+    candidates: 0,
+    total,
+    cached,
+    thoughts: 0,
+    tool: 0,
+  });
+
+  const roleMetrics = (prompt: number, cached: number, total: number) => ({
+    totalRequests: 1,
+    totalErrors: 0,
+    totalLatencyMs: 0,
+    tokens: tokens(prompt, cached, total),
+  });
+
+  const sessionMetrics = (model: Partial<ModelMetrics>): SessionMetrics => ({
+    models: {
+      'gemini-pro': {
+        api: { totalRequests: 0, totalErrors: 0, totalLatencyMs: 0 },
+        tokens: tokens(0, 0, 0),
+        roles: {},
+        ...model,
+      },
+    },
+    tools: {
+      totalCalls: 0,
+      totalSuccess: 0,
+      totalFail: 0,
+      totalDurationMs: 0,
+      totalDecisions: { accept: 0, reject: 0, modify: 0, auto_accept: 0 },
+      byName: {},
+    },
+    files: { totalLinesAdded: 0, totalLinesRemoved: 0 },
+  });
+
+  it('leaves out tokens spent by background sub-agents', () => {
+    const metrics = sessionMetrics({
+      tokens: tokens(943700, 844700, 953300),
+      roles: {
+        [LlmRole.MAIN]: roleMetrics(1000, 500, 2000),
+        [LlmRole.SUBAGENT]: roleMetrics(943700, 844700, 953300),
+      },
+    });
+
+    expect(getSessionTokenTotals(metrics)).toEqual({
+      prompt: 1000,
+      cached: 500,
+      total: 2000,
+    });
+  });
+
+  it('keeps the utility roles that serve the session itself', () => {
+    const metrics = sessionMetrics({
+      roles: {
+        [LlmRole.MAIN]: roleMetrics(1000, 500, 2000),
+        [LlmRole.UTILITY_COMPRESSOR]: roleMetrics(400, 100, 500),
+      },
+    });
+
+    expect(getSessionTokenTotals(metrics)).toEqual({
+      prompt: 1400,
+      cached: 600,
+      total: 2500,
+    });
+  });
+
+  it('falls back to the bare totals when a model has no role breakdown', () => {
+    const metrics = sessionMetrics({ tokens: tokens(300, 100, 400) });
+
+    expect(getSessionTokenTotals(metrics)).toEqual({
+      prompt: 300,
+      cached: 100,
+      total: 400,
+    });
+  });
+
+  it('sums the session roles across models', () => {
+    const metrics: SessionMetrics = {
+      models: {
+        'gemini-pro': {
+          api: { totalRequests: 0, totalErrors: 0, totalLatencyMs: 0 },
+          tokens: tokens(0, 0, 0),
+          roles: { [LlmRole.MAIN]: roleMetrics(100, 50, 200) },
+        },
+        'gemini-pro-latest': {
+          api: { totalRequests: 0, totalErrors: 0, totalLatencyMs: 0 },
+          tokens: tokens(0, 0, 0),
+          roles: { [LlmRole.MAIN]: roleMetrics(300, 150, 400) },
+        },
+      },
+      tools: {
+        totalCalls: 0,
+        totalSuccess: 0,
+        totalFail: 0,
+        totalDurationMs: 0,
+        totalDecisions: { accept: 0, reject: 0, modify: 0, auto_accept: 0 },
+        byName: {},
+      },
+      files: { totalLinesAdded: 0, totalLinesRemoved: 0 },
+    };
+
+    expect(getSessionTokenTotals(metrics)).toEqual({
+      prompt: 400,
+      cached: 200,
+      total: 600,
+    });
+  });
+
+  it('returns zeroes when nothing has been recorded yet', () => {
+    expect(getSessionTokenTotals(sessionMetrics({}))).toEqual({
+      prompt: 0,
+      cached: 0,
+      total: 0,
+    });
   });
 });
