@@ -19,6 +19,7 @@
  */
 
 import * as fs from 'node:fs';
+import * as path from 'node:path';
 import { debugLogger } from '../../utils/debugLogger.js';
 import { getErrorMessage } from '../../utils/errors.js';
 import {
@@ -27,6 +28,7 @@ import {
   validateProviderModels,
   type OpenAiProviderModel,
 } from './providers.js';
+import type { RemoteModel } from './openaiClient.js';
 
 /** Narrows an unknown to a plain JSON object. Arrays are excluded. */
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -165,26 +167,253 @@ export function setProviderModels(
   );
 }
 
+/** The two numbers a provider file can carry per model. */
+const TOKEN_SETTING_FIELDS = ['contextWindowSize', 'maxToken'] as const;
+type TokenSettingField = (typeof TOKEN_SETTING_FIELDS)[number];
+
+/** One number this module filled in from the endpoint's own catalog. */
+interface AutoTokenSetting {
+  value: number;
+  /** When the endpoint last reported this value. */
+  fetchedAt: string;
+}
+
+type AutoModelSettings = Partial<Record<TokenSettingField, AutoTokenSetting>>;
+type AutoProviderSettings = Record<string, AutoModelSettings>;
+type AutoSettingsDocument = Record<string, AutoProviderSettings>;
+
 /**
- * Merges freshly fetched model ids into the saved list.
+ * Where the values this module filled in itself are remembered.
  *
- * Entries already saved keep their `contextWindowSize` / `maxToken` overrides;
- * only the set of ids is refreshed. `fetched` must come from the endpoint, so
- * an empty list is a no-op rather than a wipe of what the user configured.
+ * Kept beside the provider file rather than inside it on purpose: every
+ * released version validates a provider entry with a strict schema, so an extra
+ * key on a model entry makes an older CLI reject the whole provider file —
+ * including its credentials. A sidecar file is invisible to those versions,
+ * which simply keep treating the numbers they find as the user's own, so a
+ * downgrade degrades into "no automatic refresh" instead of "cannot start".
+ */
+export function getAutoSettingsPath(
+  filePath: string = getOpenAiProvidersPath(),
+): string {
+  return path.join(
+    path.dirname(filePath),
+    `${path.basename(filePath, '.json')}.auto.json`,
+  );
+}
+
+/**
+ * Reads the provenance file, best-effort.
+ *
+ * A missing, unreadable or malformed file reads as empty, which is the
+ * conservative direction: without a record a saved number is the user's, so it
+ * is never overwritten.
+ */
+/** A positive whole number, or `undefined` for anything else. */
+function readPositiveInteger(value: unknown): number | undefined {
+  if (typeof value !== 'number') return undefined;
+  return Number.isSafeInteger(value) && value > 0 ? value : undefined;
+}
+
+/** A non-empty string, or `undefined` for anything else. */
+function readText(value: unknown): string | undefined {
+  return typeof value === 'string' && value ? value : undefined;
+}
+
+function readAutoSettings(filePath: string): AutoSettingsDocument {
+  const document: AutoSettingsDocument = {};
+  if (!fs.existsSync(filePath)) {
+    return document;
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(
+      fs.readFileSync(filePath, 'utf8').replace(/^\uFEFF/, ''),
+    );
+  } catch (error) {
+    debugLogger.debug(
+      `Could not read ${filePath}; saved token settings count as user-set: ${getErrorMessage(error)}`,
+    );
+    return document;
+  }
+  if (!isRecord(parsed)) return document;
+
+  for (const [providerId, models] of Object.entries(parsed)) {
+    if (!isRecord(models)) continue;
+    const providerSettings: AutoProviderSettings = {};
+    for (const [modelId, fields] of Object.entries(models)) {
+      if (!isRecord(fields)) continue;
+      const modelSettings: AutoModelSettings = {};
+      for (const field of TOKEN_SETTING_FIELDS) {
+        const setting = fields[field];
+        if (!isRecord(setting)) continue;
+        const value = readPositiveInteger(setting['value']);
+        if (value === undefined) continue;
+        modelSettings[field] = {
+          value,
+          fetchedAt: readText(setting['fetchedAt']) ?? '',
+        };
+      }
+      if (Object.keys(modelSettings).length > 0) {
+        providerSettings[modelId] = modelSettings;
+      }
+    }
+    if (Object.keys(providerSettings).length > 0) {
+      document[providerId] = providerSettings;
+    }
+  }
+  return document;
+}
+
+/**
+ * Writes the provenance file, best-effort, and removes it once it holds nothing.
+ *
+ * Failing to record provenance is not a user-visible problem: it only means the
+ * next fetch treats the number as hand-set and leaves it alone.
+ */
+function writeAutoSettings(
+  document: AutoSettingsDocument,
+  filePath: string,
+): boolean {
+  for (const providerId of Object.keys(document)) {
+    const providerSettings = document[providerId];
+    for (const modelId of Object.keys(providerSettings)) {
+      if (Object.keys(providerSettings[modelId]).length === 0) {
+        delete providerSettings[modelId];
+      }
+    }
+    if (Object.keys(providerSettings).length === 0) delete document[providerId];
+  }
+
+  try {
+    if (Object.keys(document).length === 0) {
+      fs.rmSync(filePath, { force: true });
+      return true;
+    }
+    fs.writeFileSync(filePath, `${JSON.stringify(document, null, 2)}\n`, {
+      encoding: 'utf8',
+      mode: 0o600,
+    });
+    return true;
+  } catch (error) {
+    debugLogger.debug(
+      `Could not record auto-filled token settings in ${filePath}: ${getErrorMessage(error)}`,
+    );
+    return false;
+  }
+}
+
+/** Forgets that this module supplied the given numbers, so they count as the user's. */
+function forgetAutoSettings(
+  providerId: string,
+  modelId: string,
+  fields: TokenSettingField[],
+  filePath: string,
+): void {
+  if (fields.length === 0) return;
+  const autoPath = getAutoSettingsPath(filePath);
+  const document = readAutoSettings(autoPath);
+  const providerSettings = document[providerId];
+  const record = providerSettings?.[modelId];
+  if (!providerSettings || !record) return;
+
+  for (const field of fields) delete record[field];
+  if (Object.keys(record).length === 0) delete providerSettings[modelId];
+  writeAutoSettings(document, autoPath);
+}
+
+/**
+ * Merges freshly fetched models into the saved list, filling in the token
+ * limits the endpoint advertises.
+ *
+ * The rules, in the order they matter:
+ *
+ * 1. A number the user typed is never overwritten. Requirement, not politeness:
+ *    providers get these wrong, and the value drives compression.
+ * 2. An empty field is filled from the endpoint, and the fact that it was
+ *    filled here is recorded, so a later fetch may revise its own value.
+ * 3. A number without that record counts as the user's, which is also what
+ *    happens when the sidecar is missing or a value was edited by hand.
+ *
+ * `fetched` must come from the endpoint, so an empty list is a no-op rather
+ * than a wipe of what the user configured.
  */
 export function mergeProviderModels(
   providerId: string,
-  fetched: string[],
+  fetched: Array<string | RemoteModel>,
   filePath: string = getOpenAiProvidersPath(),
 ): boolean {
-  const unique = [...new Set(fetched.map((id) => id.trim()).filter(Boolean))];
-  if (unique.length === 0) {
+  const incoming = new Map<
+    string,
+    Pick<RemoteModel, 'contextWindowSize' | 'maxToken'>
+  >();
+  for (const entry of fetched) {
+    const model = typeof entry === 'string' ? { modelId: entry } : entry;
+    const modelId = model?.modelId.trim();
+    if (!modelId) continue;
+    const previous = incoming.get(modelId);
+    incoming.set(modelId, {
+      contextWindowSize: model.contextWindowSize ?? previous?.contextWindowSize,
+      maxToken: model.maxToken ?? previous?.maxToken,
+    });
+  }
+  if (incoming.size === 0) {
     return false;
   }
-  const existing = getProviderModels(providerId, filePath);
-  const byId = new Map(existing.map((model) => [model.modelId, model]));
-  const merged = unique.map((id) => byId.get(id) ?? { modelId: id });
-  return setProviderModels(providerId, merged, filePath);
+
+  const existing = new Map(
+    getProviderModels(providerId, filePath).map((model) => [
+      model.modelId,
+      model,
+    ]),
+  );
+  const autoPath = getAutoSettingsPath(filePath);
+  const autoDocument = readAutoSettings(autoPath);
+  const providerAuto: AutoProviderSettings = { ...autoDocument[providerId] };
+  const fetchedAt = new Date().toISOString();
+  const merged: OpenAiProviderModel[] = [];
+
+  for (const [modelId, limits] of incoming) {
+    const saved = cleanModel(existing.get(modelId) ?? { modelId });
+    const record: AutoModelSettings = { ...providerAuto[modelId] };
+
+    for (const field of TOKEN_SETTING_FIELDS) {
+      const reported = limits[field];
+      if (reported === undefined) continue;
+      const value = saved[field];
+      // A record whose value no longer matches means the user has edited it
+      // since; from here on the number is theirs.
+      if (record[field] && record[field].value !== value) delete record[field];
+
+      if (value === undefined) {
+        saved[field] = reported;
+        record[field] = { value: reported, fetchedAt };
+      } else if (value !== reported && record[field]) {
+        saved[field] = reported;
+        record[field] = { value: reported, fetchedAt };
+      }
+    }
+
+    if (Object.keys(record).length === 0) delete providerAuto[modelId];
+    else providerAuto[modelId] = record;
+    merged.push(saved);
+  }
+
+  // Retired models must not leave provenance behind, or a model that comes back
+  // later would silently reclaim ownership of a number the user has since set.
+  for (const modelId of Object.keys(providerAuto)) {
+    if (!incoming.has(modelId)) delete providerAuto[modelId];
+  }
+
+  if (!setProviderModels(providerId, merged, filePath)) {
+    return false;
+  }
+  if (Object.keys(providerAuto).length > 0) {
+    autoDocument[providerId] = providerAuto;
+  } else {
+    delete autoDocument[providerId];
+  }
+  writeAutoSettings(autoDocument, autoPath);
+  return true;
 }
 
 /**
@@ -216,5 +445,15 @@ export function saveProviderModelSettings(
   } else {
     updated.push(next);
   }
-  return setProviderModels(providerId, updated, filePath);
+  if (!setProviderModels(providerId, updated, filePath)) {
+    return false;
+  }
+  // Hand-entered numbers take ownership away from any auto-filled value.
+  forgetAutoSettings(
+    providerId,
+    modelId,
+    TOKEN_SETTING_FIELDS.filter((field) => settings[field] !== undefined),
+    filePath,
+  );
+  return true;
 }

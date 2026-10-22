@@ -26,6 +26,7 @@ import { fetch as undiciFetch } from 'undici';
 import type * as undici from 'undici';
 import { createSafeProxyAgent, isLoopbackHost } from '../../utils/fetch.js';
 import { debugLogger } from '../../utils/debugLogger.js';
+import { normalizeTokenCount } from './providers.js';
 import type {
   OpenAIChatCompletion,
   OpenAIChatCompletionRequest,
@@ -205,7 +206,120 @@ function readModelId(entry: unknown): string | undefined {
 }
 
 /**
- * Extracts model ids from a `/models` response body.
+ * The per-model numbers a `/models` body advertises, when it advertises any.
+ *
+ * Both fields stay optional: most implementations of the dialect return ids
+ * only, and a missing number has to be distinguishable from a reported one.
+ */
+export interface RemoteModel {
+  modelId: string;
+  /** Total context window the endpoint claims for this model. */
+  contextWindowSize?: number;
+  /** Output cap the endpoint claims for this model. */
+  maxToken?: number;
+}
+
+/**
+ * Field names a dialect may use for a model's context window.
+ *
+ * `context_length` is OpenRouter's, `max_model_len` is vLLM's, `inputTokenLimit`
+ * is Vertex's, `n_ctx` is llama.cpp's; the rest are in common use among
+ * gateways that copied one of those schemas.
+ */
+const CONTEXT_WINDOW_KEYS = [
+  'context_length',
+  'context_window',
+  'max_context_length',
+  'max_context_window',
+  'max_model_len',
+  'max_input_tokens',
+  'inputTokenLimit',
+  'n_ctx',
+];
+
+/**
+ * Field names a dialect may use for a model's output cap.
+ *
+ * `max_tokens` is deliberately absent: in a catalog it names a *request*
+ * parameter often enough that reading it as an output cap would send a wrong
+ * `max_tokens` upstream.
+ */
+const MAX_OUTPUT_KEYS = [
+  'max_completion_tokens',
+  'max_output_tokens',
+  'outputTokenLimit',
+];
+
+/** Sub-objects a dialect may nest the same numbers under. */
+const NESTED_KEYS = ['top_provider', 'limits'];
+
+/** Anything above this is a unit error, not a context window. */
+const MAX_PLAUSIBLE_TOKENS = 100_000_000;
+
+function readTokenCount(value: unknown): number | undefined {
+  if (typeof value !== 'number' && typeof value !== 'string') return undefined;
+  const parsed = normalizeTokenCount(value);
+  if (parsed === 'invalid' || parsed > MAX_PLAUSIBLE_TOKENS) return undefined;
+  return parsed;
+}
+
+/**
+ * Collects every plausible reading of one number from an entry.
+ *
+ * More than one copy is normal: OpenRouter publishes both a model-level
+ * `context_length` and the `top_provider` route's own, and they disagree.
+ */
+function collectTokenCounts(
+  entry: Record<string, unknown>,
+  keys: string[],
+): number[] {
+  const found: number[] = [];
+  const read = (record: Record<string, unknown>): void => {
+    for (const key of keys) {
+      const value = readTokenCount(record[key]);
+      if (value !== undefined) found.push(value);
+    }
+  };
+  read(entry);
+  for (const nestedKey of NESTED_KEYS) {
+    const nested = entry[nestedKey];
+    if (isRecord(nested)) read(nested);
+  }
+  return found;
+}
+
+/**
+ * Reads the token limits out of one catalog entry.
+ *
+ * Disagreements resolve to the smallest number: a route that serves the model
+ * with a 262k window cannot serve 1M regardless of what the model card says,
+ * and an output cap larger than the window is a schema mismatch rather than a
+ * usable limit, so it is dropped instead of clamped.
+ */
+function readModelLimits(entry: unknown): {
+  contextWindowSize?: number;
+  maxToken?: number;
+} {
+  if (!isRecord(entry)) return {};
+  const windows = collectTokenCounts(entry, CONTEXT_WINDOW_KEYS);
+  const outputs = collectTokenCounts(entry, MAX_OUTPUT_KEYS);
+  const contextWindowSize = windows.length ? Math.min(...windows) : undefined;
+  let maxToken = outputs.length ? Math.min(...outputs) : undefined;
+  if (
+    maxToken !== undefined &&
+    contextWindowSize !== undefined &&
+    maxToken >= contextWindowSize
+  ) {
+    maxToken = undefined;
+  }
+  return {
+    ...(contextWindowSize !== undefined ? { contextWindowSize } : {}),
+    ...(maxToken !== undefined ? { maxToken } : {}),
+  };
+}
+
+/**
+ * Extracts model entries from a `/models` response body.
  *
  * The official shape is `{"object":"list","data":[{"id":"..."}]}`, but proxies
  * implementing a partial dialect differ: some answer `{"models":[...]}`, some
@@ -213,8 +327,12 @@ function readModelId(entry: unknown): string | undefined {
  * whole point of the call is to show the user what this particular endpoint
  * serves, a shape that yields nothing is a failure worth reporting rather than
  * silently returning an empty list.
+ *
+ * The same model can appear twice (OpenRouter lists one entry per route); the
+ * first occurrence wins the position and later duplicates only contribute
+ * numbers the first one was missing.
  */
-export function parseModelList(text: string): string[] {
+export function parseModelList(text: string): RemoteModel[] {
   let parsed: unknown;
   try {
     parsed = JSON.parse(text);
@@ -242,12 +360,23 @@ export function parseModelList(text: string): string[] {
     );
   }
 
-  const ids: string[] = [];
+  const models: RemoteModel[] = [];
+  const byId = new Map<string, RemoteModel>();
   for (const entry of entries) {
-    const id = readModelId(entry);
-    if (id && !ids.includes(id)) ids.push(id);
+    const modelId = readModelId(entry);
+    if (!modelId) continue;
+    const limits = readModelLimits(entry);
+    const existing = byId.get(modelId);
+    if (existing) {
+      existing.contextWindowSize ??= limits.contextWindowSize;
+      existing.maxToken ??= limits.maxToken;
+      continue;
+    }
+    const model: RemoteModel = { modelId, ...limits };
+    byId.set(modelId, model);
+    models.push(model);
   }
-  return ids;
+  return models;
 }
 
 /**
@@ -493,13 +622,13 @@ export class OpenAICompatibleClient {
   }
 
   /**
-   * Lists the model ids the endpoint serves.
+   * Lists the models the endpoint serves, with the token limits it advertises.
    *
    * `GET /models` is a GET rather than a POST, so it does not go through
    * `post()` — that helper exists to attach a JSON body and reuse the headers
    * timeout, and a listing request has neither.
    */
-  async listModels(signal?: AbortSignal): Promise<string[]> {
+  async listModels(signal?: AbortSignal): Promise<RemoteModel[]> {
     const url = resolveEndpointUrl(this.baseUrl, '/models');
     const bounded = buildBoundedSignal(signal, HEADERS_TIMEOUT_MS);
     const options: FetchOptions = {
