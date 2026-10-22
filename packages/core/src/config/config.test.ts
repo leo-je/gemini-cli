@@ -2807,6 +2807,88 @@ describe('Config getHooks', () => {
     expect(Object.keys(retrievedHooks!)).toHaveLength(11); // All hook event types
   });
 
+  describe('utility model selection', () => {
+    const resolveUtility = (config: Config, alias: string) =>
+      config.getModelConfigService().getResolvedConfig({ model: alias });
+
+    it('should keep the built-in aliases when nothing is configured', () => {
+      const config = new Config(baseParams);
+
+      expect(resolveUtility(config, 'summarizer-default').model).not.toBe(
+        config.getModel(),
+      );
+      // The maxOutputTokens value doubles as the summarizer's usefulness
+      // threshold, so repointing the model must not drop it.
+      expect(
+        resolveUtility(config, 'summarizer-default').generateContentConfig
+          .maxOutputTokens,
+      ).toBe(2000);
+    });
+
+    it('should follow the main model when set to "main"', () => {
+      const config = new Config({ ...baseParams, utilityModel: 'main' });
+
+      const mainModel = config
+        .getModelConfigService()
+        .getResolvedConfig({ model: config.getModel() }).model;
+      expect(resolveUtility(config, 'summarizer-default').model).toBe(
+        mainModel,
+      );
+      expect(resolveUtility(config, 'summarizer-shell').model).toBe(mainModel);
+    });
+
+    it('should re-apply the selection after the main model changes', () => {
+      const config = new Config({ ...baseParams, utilityModel: 'main' });
+
+      config.setModel('gemini-2.5-pro');
+
+      const newMainModel = config
+        .getModelConfigService()
+        .getResolvedConfig({ model: 'gemini-2.5-pro' }).model;
+      expect(resolveUtility(config, 'summarizer-default').model).toBe(
+        newMainModel,
+      );
+    });
+
+    it('should use an explicitly configured utility model', () => {
+      const config = new Config({
+        ...baseParams,
+        utilityModel: 'custom-utility-model',
+      });
+
+      expect(resolveUtility(config, 'summarizer-default').model).toBe(
+        'custom-utility-model',
+      );
+      expect(
+        resolveUtility(config, 'summarizer-default').generateContentConfig
+          .maxOutputTokens,
+      ).toBe(2000);
+    });
+
+    it('should restore the built-in alias when the selection is cleared', () => {
+      const config = new Config(baseParams);
+      const builtInModel = resolveUtility(config, 'summarizer-default').model;
+
+      config
+        .getModelConfigService()
+        .registerRuntimeModelConfig('summarizer-default', {
+          modelConfig: { model: 'temporary-model' },
+        });
+      expect(resolveUtility(config, 'summarizer-default').model).toBe(
+        'temporary-model',
+      );
+
+      expect(
+        config
+          .getModelConfigService()
+          .unregisterRuntimeModelConfig('summarizer-default'),
+      ).toBe(true);
+      expect(resolveUtility(config, 'summarizer-default').model).toBe(
+        builtInModel,
+      );
+    });
+  });
+
   describe('setModel', () => {
     it('should allow setting a pro (any) model and reset availability', () => {
       const config = new Config(baseParams);

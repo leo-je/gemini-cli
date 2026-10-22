@@ -574,6 +574,16 @@ their corresponding top-level category object in your `settings.json` file.
 
 #### `modelConfigs`
 
+- **`modelConfigs.utilityModel`** (string):
+
+  - **Description:** Model used for internal utility calls: tool-output
+    summaries, session summaries, and shell-output summaries. Leave empty to
+    keep the built-in `summarizer-default` / `summarizer-shell` aliases, use
+    `main` to follow the main model, or enter a model id or alias as shown by
+    `/model`.
+  - **Default:** `""`
+  - **Requires restart:** Yes
+
 - **`modelConfigs.aliases`** (object):
 
   - **Description:** Named presets for model configs. Can be used in place of a

@@ -108,6 +108,12 @@ they appear in the UI.
 | Disable Loop Detection        | `model.disableLoopDetection` | Disable automatic detection and prevention of infinite loops.                          | `false`     |
 | Skip Next Speaker Check       | `model.skipNextSpeakerCheck` | Skip the next speaker check.                                                           | `true`      |
 
+### ModelConfigs
+
+| UI Label      | Setting                     | Description                                                                                                                                                                                                                                                                              | Default |
+| ------------- | --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- |
+| Utility Model | `modelConfigs.utilityModel` | Model used for internal utility calls: tool-output summaries, session summaries, and shell-output summaries. Leave empty to keep the built-in `summarizer-default` / `summarizer-shell` aliases, use `main` to follow the main model, or enter a model id or alias as shown by `/model`. | `""`    |
+
 ### Agents
 
 | UI Label                  | Setting                                  | Description                                                                                   | Default |

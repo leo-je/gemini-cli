@@ -617,6 +617,23 @@ export interface WorktreeSettings {
   baseSha: string;
 }
 
+/**
+ * Utility-model selection that keeps the utility aliases pointing at whatever
+ * the main model currently is, mirroring the `inherit` convention the agent
+ * registry already uses.
+ */
+const UTILITY_MODEL_FOLLOW_MAIN = 'main';
+
+/**
+ * Aliases every utility call site resolves through: tool-output and session
+ * summaries use `summarizer-default`, shell-output summaries use
+ * `summarizer-shell`.
+ */
+const UTILITY_MODEL_ALIASES = [
+  'summarizer-default',
+  'summarizer-shell',
+] as const;
+
 export interface ConfigParameters {
   sessionId: string;
   clientName?: string;
@@ -738,6 +755,12 @@ export interface ConfigParameters {
   acceptRawOutputRisk?: boolean;
   dynamicModelConfiguration?: boolean;
   modelConfigServiceConfig?: ModelConfigServiceConfig;
+  /**
+   * Model used by the utility aliases (`summarizer-default`,
+   * `summarizer-shell`). Empty keeps the built-in definitions; `'main'`
+   * follows the main model; anything else is used as a model id or alias.
+   */
+  utilityModel?: string;
   enableHooks?: boolean;
   enableHooksUI?: boolean;
   experiments?: Experiments;
@@ -976,6 +999,12 @@ export class Config implements McpContext, AgentLoopContext {
   private readonly rawOutput: boolean;
   private readonly acceptRawOutputRisk: boolean;
   private readonly dynamicModelConfiguration: boolean;
+  /**
+   * Utility-model selection as configured: empty keeps the built-in aliases,
+   * {@link UTILITY_MODEL_FOLLOW_MAIN} follows the main model, anything else is a
+   * model id or alias used verbatim.
+   */
+  private readonly utilityModelSelection: string;
   private pendingIncludeDirectories: string[];
   private readonly enableHooksUI: boolean;
   private readonly enableHooks: boolean;
@@ -1169,6 +1198,7 @@ export class Config implements McpContext, AgentLoopContext {
     this.fileDiscoveryService = params.fileDiscoveryService ?? null;
     this.bugCommand = params.bugCommand;
     this.model = params.model;
+    this.utilityModelSelection = params.utilityModel?.trim() ?? '';
     this.disableLoopDetection = params.disableLoopDetection ?? false;
     this._activeModel = params.model;
     this.enableAgents = params.enableAgents ?? true;
@@ -1231,6 +1261,7 @@ export class Config implements McpContext, AgentLoopContext {
     this.modelConfigService = new ModelConfigService(
       modelConfigServiceConfig ?? DEFAULT_MODEL_CONFIGS,
     );
+    this.applyUtilityModelSelection();
 
     this.experimentalAutoMemory = params.experimentalAutoMemory ?? false;
     this.experimentalGemma = params.experimentalGemma ?? true;
@@ -2053,6 +2084,34 @@ export class Config implements McpContext, AgentLoopContext {
     }
     this.modelAvailabilityService.reset();
     this.applyOpenAiContextWindow(newModel);
+    this.applyUtilityModelSelection();
+  }
+
+  /**
+   * Points the utility aliases at the configured utility model.
+   *
+   * Runtime aliases shadow the built-in `summarizer-default` /
+   * `summarizer-shell` definitions without rewriting the user's settings. The
+   * built-in entry is spread over rather than rebuilt so every field the callers
+   * rely on survives — notably `maxOutputTokens`, which `summarizeToolOutput`
+   * also uses as the "is this output worth summarizing" threshold.
+   */
+  private applyUtilityModelSelection(): void {
+    const model =
+      this.utilityModelSelection === UTILITY_MODEL_FOLLOW_MAIN
+        ? this.model
+        : this.utilityModelSelection;
+    for (const aliasName of UTILITY_MODEL_ALIASES) {
+      if (!model) {
+        this.modelConfigService.unregisterRuntimeModelConfig(aliasName);
+        continue;
+      }
+      const builtIn = DEFAULT_MODEL_CONFIGS.aliases?.[aliasName];
+      this.modelConfigService.registerRuntimeModelConfig(aliasName, {
+        ...builtIn,
+        modelConfig: { ...builtIn?.modelConfig, model },
+      });
+    }
   }
 
   /**

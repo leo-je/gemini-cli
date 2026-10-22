@@ -1150,6 +1150,18 @@ const SETTINGS_SCHEMA = {
     description: 'Model configurations.',
     showInDialog: false,
     properties: {
+      utilityModel: {
+        type: 'string',
+        label: 'Utility Model',
+        category: 'Model',
+        // The value is read once while the Config is built, so a change only
+        // takes effect on the next start.
+        requiresRestart: true,
+        default: '',
+        description:
+          'Model used for internal utility calls: tool-output summaries, session summaries, and shell-output summaries. Leave empty to keep the built-in `summarizer-default` / `summarizer-shell` aliases, use `main` to follow the main model, or enter a model id or alias as shown by `/model`.',
+        showInDialog: true,
+      },
       aliases: {
         type: 'object',
         label: 'Model Config Aliases',

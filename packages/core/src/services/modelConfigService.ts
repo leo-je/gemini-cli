@@ -362,6 +362,18 @@ export class ModelConfigService {
     this.runtimeAliases[aliasName] = alias;
   }
 
+  /**
+   * Drops a runtime alias so the built-in or config-provided definition applies
+   * again. Returns true when an alias was actually removed.
+   */
+  unregisterRuntimeModelConfig(aliasName: string): boolean {
+    if (!(aliasName in this.runtimeAliases)) {
+      return false;
+    }
+    delete this.runtimeAliases[aliasName];
+    return true;
+  }
+
   registerRuntimeModelOverride(override: ModelConfigOverride): void {
     this.runtimeOverrides.push(override);
   }

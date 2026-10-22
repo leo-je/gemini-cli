@@ -593,6 +593,44 @@ describe('ModelConfigService', () => {
         temperature: 0.123,
       });
     });
+
+    it('should fall back to the configured alias once a runtime alias is unregistered', () => {
+      const service = new ModelConfigService({
+        aliases: {
+          'summarizer-default': {
+            modelConfig: {
+              model: 'built-in-model',
+              generateContentConfig: { maxOutputTokens: 2000 },
+            },
+          },
+        },
+        overrides: [],
+      });
+
+      service.registerRuntimeModelConfig('summarizer-default', {
+        modelConfig: { model: 'runtime-model' },
+      });
+      expect(
+        service.getResolvedConfig({ model: 'summarizer-default' }).model,
+      ).toBe('runtime-model');
+
+      expect(service.unregisterRuntimeModelConfig('summarizer-default')).toBe(
+        true,
+      );
+      const restored = service.getResolvedConfig({
+        model: 'summarizer-default',
+      });
+      expect(restored.model).toBe('built-in-model');
+      expect(restored.generateContentConfig.maxOutputTokens).toBe(2000);
+    });
+
+    it('should report when there is no runtime alias to unregister', () => {
+      const service = new ModelConfigService({ aliases: {}, overrides: [] });
+
+      expect(service.unregisterRuntimeModelConfig('never-registered')).toBe(
+        false,
+      );
+    });
   });
 
   describe('runtime overrides', () => {

@@ -1733,6 +1733,13 @@
       },
       "type": "object",
       "properties": {
+        "utilityModel": {
+          "title": "Utility Model",
+          "description": "Model used for internal utility calls: tool-output summaries, session summaries, and shell-output summaries. Leave empty to keep the built-in `summarizer-default` / `summarizer-shell` aliases, use `main` to follow the main model, or enter a model id or alias as shown by `/model`.",
+          "markdownDescription": "Model used for internal utility calls: tool-output summaries, session summaries, and shell-output summaries. Leave empty to keep the built-in `summarizer-default` / `summarizer-shell` aliases, use `main` to follow the main model, or enter a model id or alias as shown by `/model`.\n\n- Category: `Model`\n- Requires restart: `yes`\n- Default: ``",
+          "default": "",
+          "type": "string"
+        },
         "aliases": {
           "title": "Model Config Aliases",
           "description": "Named presets for model configs. Can be used in place of a model name and can inherit from other aliases using an `extends` property.",

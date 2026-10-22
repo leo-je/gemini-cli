@@ -148,6 +148,31 @@ Directly maps to the SDK's `GenerateContentConfig`. Common parameters include:
 
 ## 5. Practical Examples
 
+### Pointing Utility Calls at Another Model
+
+Internal utility calls — tool-output summaries, session summaries, and
+shell-output summaries — go through the `summarizer-default` and
+`summarizer-shell` aliases. `modelConfigs.utilityModel` repoints both without
+redefining them:
+
+```json
+"modelConfigs": {
+  "utilityModel": "gemini-2.5-flash-lite"
+}
+```
+
+- Empty (the default) keeps the built-in aliases.
+- `"main"` follows whatever model the session is using, including after a
+  `/model` switch.
+- Anything else is used verbatim as a model id or alias.
+
+It is injected as a runtime alias, so it takes precedence over a `customAliases`
+entry of the same name, while `overrides` still apply on top of it. The
+generated `maxOutputTokens` of the built-in aliases (2000) is preserved, because
+the summarizer also uses that value as the threshold for deciding whether output
+is worth summarizing. The setting is read while the session starts, so a change
+takes effect on the next start.
+
 ### Defining a Deterministic Baseline
 
 Create an alias for tasks requiring high precision, extending the standard chat
