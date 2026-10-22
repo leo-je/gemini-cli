@@ -73,6 +73,9 @@ UI, consume your interactive turns, or surface tool prompts.
     coordinates across multiple CLI instances so extraction runs at most once at
     a time. A state file records processed session versions, and extraction is
     throttled so short back-to-back CLI launches do not repeatedly scan history.
+    The attempt is recorded before the extraction agent starts, so a session
+    closed mid-run still counts as a run for throttling and is retried once the
+    throttle window has passed.
 3.  **Candidate extraction.** A background extraction agent reviews the session
     index, reads any sessions that look like they contain durable memory or
     repeated procedural workflows, and drafts candidates. It defaults to
@@ -148,6 +151,9 @@ start. Existing inbox items remain on disk; you can either drain them with
   incidents.
 - Auto Memory does not extract memory or skills from the current session. It
   only considers sessions that have been idle for three hours or more.
+- Extraction tokens are billed to the process but not to your session: the
+  footer's `token-count` and `cache-hit` columns count only interactive work, so
+  a background extraction run does not show up as session usage.
 - Project or workspace shared instructions in project `GEMINI.md` files are not
   auto-extractable. Auto Memory can propose private project memory, global
   personal memory, and skills.
