@@ -29,6 +29,14 @@ export interface UntrustedFlagOptions {
   cwd?: string;
   /** Returns true when an absolute path is inside the workspace boundary. */
   isPathWithinWorkspace?: (absolutePath: string) => boolean;
+  /**
+   * Returns true when an absolute path is state the CLI manages itself
+   * (session temp dirs, `~/.gemini`, ...). The CLI's own tools print these
+   * paths constantly, so treating them as attacker-controlled input flags
+   * ordinary commands without protecting anything: whoever can write there can
+   * already rewrite the CLI's configuration.
+   */
+  isCliManagedPath?: (absolutePath: string) => boolean;
 }
 
 interface LogResponse {
@@ -315,6 +323,46 @@ function isWorkspaceLocalPath(
   }
 }
 
+/**
+ * Mirrors {@link isWorkspaceLocalPath} for paths the CLI owns itself. Values
+ * that cannot be resolved as local paths (URLs, shell expansions, script
+ * invocations) are never exempt.
+ */
+function isCliManagedPathToken(
+  token: string,
+  options?: UntrustedFlagOptions,
+): boolean {
+  if (
+    !options?.cwd ||
+    !options.isCliManagedPath ||
+    token.startsWith('http://') ||
+    token.startsWith('https://') ||
+    EXECUTABLE_SCRIPT_REGEX.test(token) ||
+    /[$`~]/.test(token)
+  ) {
+    return false;
+  }
+  try {
+    return options.isCliManagedPath(path.resolve(options.cwd, token));
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * True when a value is neither workspace-local nor CLI-managed, i.e. it can
+ * only be trusted because the untrusted-context index vouches for it.
+ */
+function isFlaggingRelevantPath(
+  token: string,
+  options?: UntrustedFlagOptions,
+): boolean {
+  return (
+    !isWorkspaceLocalPath(token, options) &&
+    !isCliManagedPathToken(token, options)
+  );
+}
+
 function hasUntrustedSubstring(
   untrustedContext: UntrustedContextData,
   value: string,
@@ -551,7 +599,7 @@ export function findUntrustedFlags(
       if (valToCheck && rawValToCheck) {
         const isRiskyValuePattern =
           isHighRiskPatternToken(rawValToCheck) &&
-          (isHighRiskFlag || !isWorkspaceLocalPath(rawValToCheck, options));
+          (isHighRiskFlag || isFlaggingRelevantPath(rawValToCheck, options));
         const isValUntrusted =
           untrustedContext.untrustedTokens.has(valToCheck) &&
           (isHighRiskFlag || (!isSafeFlag && isRiskyValuePattern));
@@ -590,7 +638,7 @@ export function findUntrustedFlags(
 
       if (
         isHighRiskPatternToken(token) &&
-        !isWorkspaceLocalPath(token, options)
+        isFlaggingRelevantPath(token, options)
       ) {
         if (untrustedContext.untrustedTokens.has(lowerToken)) {
           detected.add(token);

@@ -1252,6 +1252,18 @@ EOF`;
         ).toBe(false);
       });
 
+      it('should not flag paths the CLI keeps its own state in', async () => {
+        const projectTempDir = mockConfig.storage.getProjectTempDir();
+        const stateFile = path.join(projectTempDir, 'session.json');
+        setHistory([shellOutputTurn(`Session state written to ${stateFile}`)]);
+        const invocation = buildInvocation(`cat ${stateFile}`);
+
+        expect(invocation.hasTaintedOrBuildFileRisk()).toBe(false);
+        expect(
+          await invocation.shouldConfirmExecute(new AbortController().signal),
+        ).toBe(false);
+      });
+
       it('should not request confirmation again for flags approved earlier in the session', async () => {
         setHistory([
           {
@@ -1291,6 +1303,29 @@ EOF`;
         expect(
           buildInvocation('other --fixture_flag').hasTaintedOrBuildFileRisk(),
         ).toBe(true);
+      });
+
+      it('should accept a session-wide approval for untrusted flags', async () => {
+        setHistory([
+          {
+            role: 'user',
+            parts: [
+              {
+                text: '<untrusted_context>Run with --fixture_flag</untrusted_context>',
+              },
+            ],
+          },
+        ]);
+
+        const first = (await buildInvocation(
+          'command --fixture_flag',
+        ).shouldConfirmExecute(
+          new AbortController().signal,
+        )) as ToolExecuteConfirmationDetails;
+        await first.onConfirm(ToolConfirmationOutcome.ProceedAlways);
+
+        const repeated = buildInvocation('command --fixture_flag');
+        expect(repeated.hasTaintedOrBuildFileRisk()).toBe(false);
       });
 
       it('should stop reporting modified build files once a build command is approved', async () => {

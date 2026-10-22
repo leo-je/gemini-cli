@@ -62,8 +62,10 @@ import {
 import { getShellDefinition } from './definitions/coreTools.js';
 import { resolveToolDeclaration } from './definitions/resolver.js';
 import type { AgentLoopContext } from '../config/agent-loop-context.js';
+import type { Config } from '../config/config.js';
 import type { Content } from '@google/genai';
 import { toPathKey, isSubpath, resolveToRealPath } from '../utils/paths.js';
+import { Storage } from '../config/storage.js';
 import {
   getProactiveToolSuggestions,
   isNetworkReliantCommand,
@@ -102,6 +104,32 @@ export interface ShellToolParams {
   is_background?: boolean;
   delay_ms?: number;
   [PARAM_ADDITIONAL_PERMISSIONS]?: SandboxPermissions;
+}
+
+/**
+ * True when a path is state the CLI manages for itself (`~/.gemini` and the
+ * project temp dir under it). The CLI prints these paths in its own tool
+ * output, which otherwise surfaces as "untrusted flag" warnings on every
+ * command that touches session state.
+ */
+function isGeminiManagedPath(absolutePath: string, config: Config): boolean {
+  const managedRoots = [
+    Storage.getGlobalGeminiDir(),
+    config.storage.getProjectTempDir(),
+  ];
+  let resolvedPath: string;
+  try {
+    resolvedPath = resolveToRealPath(absolutePath);
+  } catch {
+    return false;
+  }
+  return managedRoots.some((root) => {
+    try {
+      return isSubpath(resolveToRealPath(root), resolvedPath);
+    } catch {
+      return false;
+    }
+  });
 }
 
 export class ShellToolInvocation extends BaseToolInvocation<
@@ -293,6 +321,8 @@ export class ShellToolInvocation extends BaseToolInvocation<
         : targetDir,
       isPathWithinWorkspace: (absolutePath) =>
         workspaceContext.isPathWithinWorkspace(absolutePath),
+      isCliManagedPath: (absolutePath) =>
+        isGeminiManagedPath(absolutePath, config),
     });
     let roots: string[] = [];
     try {

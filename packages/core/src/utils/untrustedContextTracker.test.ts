@@ -469,6 +469,57 @@ done`;
       expect(detected).toContain('$TMPDIR/payload.sh');
     });
 
+    describe('cli managed paths', () => {
+      const cwd = path.resolve('/home/dev/app');
+      const geminiHome = path.resolve('/home/dev/.gemini');
+      const stateFile = path.join(geminiHome, 'tmp', 'app', 'sessions.json');
+      const isCliManagedPath = (absolutePath: string) =>
+        isSubpath(geminiHome, absolutePath);
+      const options = {
+        cwd,
+        isPathWithinWorkspace: (absolutePath: string) =>
+          isSubpath(cwd, absolutePath),
+        isCliManagedPath,
+      };
+
+      it('should not flag a path the CLI manages itself', () => {
+        const untrustedContext = extractUntrustedContext([
+          shellOutputTurn(`Session state written to ${stateFile}`),
+        ]);
+
+        expect(
+          findUntrustedFlags(`cat ${stateFile}`, untrustedContext, options),
+        ).toEqual([]);
+      });
+
+      it('should still flag the same path without the CLI-managed scope', () => {
+        const untrustedContext = extractUntrustedContext([
+          shellOutputTurn(`Session state written to ${stateFile}`),
+        ]);
+
+        expect(
+          findUntrustedFlags(`cat ${stateFile}`, untrustedContext, {
+            cwd,
+            isPathWithinWorkspace: (absolutePath: string) =>
+              isSubpath(cwd, absolutePath),
+          }),
+        ).toEqual([stateFile]);
+      });
+
+      it('should not flag CLI-managed paths even when external content mentions them', () => {
+        const untrustedContext = extractUntrustedContext([
+          toolOutputTurn(
+            'mcp_tracker_get_issue',
+            `Reproduce by printing ${stateFile}`,
+          ),
+        ]);
+
+        expect(
+          findUntrustedFlags(`cat ${stateFile}`, untrustedContext, options),
+        ).toEqual([]);
+      });
+    });
+
     describe('provenance and workspace scope', () => {
       const workspaceRoot = path.resolve('/home/dev/app');
       const sourceFile = path.join(workspaceRoot, 'src', 'index.ts');
