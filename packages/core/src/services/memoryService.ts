@@ -80,6 +80,12 @@ interface IndexedSession extends SessionVersion {
 
 /**
  * Metadata for a single extraction run.
+ *
+ * `status` distinguishes a run that finished (`completed`) from one that was
+ * interrupted mid-flight (`running` when the process died, `interrupted` when
+ * the abort path handled it). Interrupted runs still carry `runAt` so they take
+ * part in the throttle; they record no processed sessions, so the next run
+ * retries them.
  */
 export interface ExtractionRun {
   runAt: string;
@@ -92,6 +98,7 @@ export interface ExtractionRun {
   turnCount?: number;
   durationMs?: number;
   terminateReason?: string;
+  status?: 'running' | 'completed' | 'interrupted';
 }
 
 /**
@@ -179,6 +186,7 @@ function isExtractionRunLike(value: unknown): value is {
   turnCount?: unknown;
   durationMs?: unknown;
   terminateReason?: unknown;
+  status?: unknown;
 } {
   return (
     typeof value === 'object' &&
@@ -241,6 +249,15 @@ function buildExtractionRun(value: unknown): ExtractionRun | null {
   const terminateReason = normalizeOptionalString(value.terminateReason);
   if (terminateReason !== undefined) {
     run.terminateReason = terminateReason;
+  }
+
+  const status = normalizeOptionalString(value.status);
+  if (
+    status === 'running' ||
+    status === 'completed' ||
+    status === 'interrupted'
+  ) {
+    run.status = status;
   }
 
   return run;
@@ -1163,9 +1180,13 @@ export async function startMemoryService(config: Config): Promise<void> {
 
   const startTime = Date.now();
   let completionResult: { error: Error } | undefined;
+  let attempt: ExtractionRun | undefined;
+  let priorRuns: ExtractionRun[] = [];
+  let runRecorded = false;
   try {
     // Read extraction state
     const state = await readExtractionState(statePath);
+    priorRuns = state.runs;
     const previousRuns = state.runs.length;
     const previouslyProcessed = getProcessedSessionIds(state).size;
     debugLogger.log(
@@ -1204,6 +1225,24 @@ export async function startMemoryService(config: Config): Promise<void> {
       debugLogger.log('[MemoryService] Skipped: no new sessions to process');
       return;
     }
+
+    // Record the attempt before the agent starts. The completed run below is
+    // the only other thing that ever writes this file, so a window that is
+    // closed mid-run used to leave no trace at all: the next start rescanned
+    // the whole history, re-extracted it, and the throttle — which reads the
+    // last run's timestamp — had nothing to read. Recording the attempt makes
+    // an interrupted run count as a run.
+    const attemptRecord: ExtractionRun = {
+      runAt: new Date().toISOString(),
+      sessionIds: [],
+      skillsCreated: [],
+      status: 'running',
+    };
+    attempt = attemptRecord;
+    await writeExtractionState(statePath, {
+      runs: [...state.runs, attemptRecord],
+    });
+    debugLogger.log('[MemoryService] Recorded attempt before starting agent');
 
     // Snapshot existing skill directories before extraction
     const skillsBefore = new Set<string>();
@@ -1406,11 +1445,15 @@ export async function startMemoryService(config: Config): Promise<void> {
       terminateReason: normalizeOptionalString(
         executorResult?.terminate_reason,
       ),
+      status: 'completed',
     };
+    // The attempt recorded before the agent started is replaced by this entry,
+    // so a completed run looks exactly as it always did.
     const updatedState: ExtractionState = {
       runs: [...state.runs, run],
     };
     await writeExtractionState(statePath, updatedState);
+    runRecorded = true;
 
     if (
       skillsCreated.length > 0 ||
@@ -1469,6 +1512,24 @@ export async function startMemoryService(config: Config): Promise<void> {
       debugLogger.log(
         `[MemoryService] Failed after ${elapsed}s: ${error instanceof Error ? error.message : String(error)}`,
       );
+    }
+    if (attempt && !runRecorded) {
+      // Mark the attempt as interrupted so the record says what happened. The
+      // processed sessions it did not get to stay unrecorded, so the next run
+      // retries them once the throttle window has passed.
+      try {
+        await writeExtractionState(statePath, {
+          runs: [...priorRuns, { ...attempt, status: 'interrupted' as const }],
+        });
+      } catch (stateError) {
+        debugLogger.log(
+          `[MemoryService] Could not record interrupted attempt: ${
+            stateError instanceof Error
+              ? stateError.message
+              : String(stateError)
+          }`,
+        );
+      }
     }
     completionResult = {
       error: error instanceof Error ? error : new Error(String(error)),

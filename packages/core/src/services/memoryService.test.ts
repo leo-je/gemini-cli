@@ -496,6 +496,140 @@ describe('memoryService', () => {
       );
     });
 
+    it('replaces the recorded attempt with the completed run', async () => {
+      const { startMemoryService, readExtractionState } = await import(
+        './memoryService.js'
+      );
+      const { LocalAgentExecutor } = await import(
+        '../agents/local-executor.js'
+      );
+
+      vi.mocked(LocalAgentExecutor.create).mockReset();
+      vi.mocked(LocalAgentExecutor.create).mockImplementationOnce(
+        async () =>
+          ({
+            run: vi.fn().mockResolvedValue(undefined),
+          }) as never,
+      );
+
+      const memoryDir = path.join(tmpDir, 'memory-completed-attempt');
+      const skillsDir = path.join(tmpDir, 'skills-completed-attempt');
+      const projectTempDir = path.join(tmpDir, 'temp-completed-attempt');
+      const chatsDir = path.join(projectTempDir, 'chats');
+      await fs.mkdir(memoryDir, { recursive: true });
+      await fs.mkdir(chatsDir, { recursive: true });
+
+      await fs.writeFile(
+        path.join(
+          chatsDir,
+          `${SESSION_FILE_PREFIX}2025-01-01T00-00-completed.json`,
+        ),
+        JSON.stringify(
+          createConversation({ sessionId: 'completed-run', messageCount: 20 }),
+        ),
+      );
+
+      const mockConfig = {
+        storage: {
+          getProjectMemoryDir: vi.fn().mockReturnValue(memoryDir),
+          getProjectMemoryTempDir: vi.fn().mockReturnValue(memoryDir),
+          getProjectSkillsMemoryDir: vi.fn().mockReturnValue(skillsDir),
+          getProjectTempDir: vi.fn().mockReturnValue(projectTempDir),
+        },
+        getToolRegistry: vi.fn(),
+        getMessageBus: vi.fn(),
+        getGeminiClient: vi.fn(),
+        getSkillManager: vi.fn().mockReturnValue({ getSkills: () => [] }),
+        modelConfigService: {
+          registerRuntimeModelConfig: vi.fn(),
+        },
+        sandboxManager: undefined,
+      } as unknown as Parameters<typeof startMemoryService>[0];
+
+      await startMemoryService(mockConfig);
+
+      const state = await readExtractionState(
+        path.join(memoryDir, '.extraction-state.json'),
+      );
+      // The attempt recorded before the run is replaced, not appended, so a
+      // completed run looks exactly like it did before attempts were recorded.
+      expect(state.runs).toHaveLength(1);
+      expect(state.runs[0].status).toBe('completed');
+    });
+
+    it('records an interrupted attempt so the next start is throttled', async () => {
+      const { startMemoryService, readExtractionState } = await import(
+        './memoryService.js'
+      );
+      const { LocalAgentExecutor } = await import(
+        '../agents/local-executor.js'
+      );
+
+      vi.mocked(LocalAgentExecutor.create).mockReset();
+      // The window is closed while the agent is running: the run throws and
+      // never reaches the completed-state write.
+      vi.mocked(LocalAgentExecutor.create).mockImplementationOnce(
+        async () =>
+          ({
+            run: vi.fn().mockRejectedValue(new Error('stream closed')),
+          }) as never,
+      );
+
+      const memoryDir = path.join(tmpDir, 'memory-interrupted-attempt');
+      const skillsDir = path.join(tmpDir, 'skills-interrupted-attempt');
+      const projectTempDir = path.join(tmpDir, 'temp-interrupted-attempt');
+      const chatsDir = path.join(projectTempDir, 'chats');
+      await fs.mkdir(memoryDir, { recursive: true });
+      await fs.mkdir(chatsDir, { recursive: true });
+
+      await fs.writeFile(
+        path.join(
+          chatsDir,
+          `${SESSION_FILE_PREFIX}2025-01-01T00-00-interrupted.json`,
+        ),
+        JSON.stringify(
+          createConversation({
+            sessionId: 'interrupted-run',
+            messageCount: 20,
+          }),
+        ),
+      );
+
+      const mockConfig = {
+        storage: {
+          getProjectMemoryDir: vi.fn().mockReturnValue(memoryDir),
+          getProjectMemoryTempDir: vi.fn().mockReturnValue(memoryDir),
+          getProjectSkillsMemoryDir: vi.fn().mockReturnValue(skillsDir),
+          getProjectTempDir: vi.fn().mockReturnValue(projectTempDir),
+        },
+        getToolRegistry: vi.fn(),
+        getMessageBus: vi.fn(),
+        getGeminiClient: vi.fn(),
+        getSkillManager: vi.fn().mockReturnValue({ getSkills: () => [] }),
+        modelConfigService: {
+          registerRuntimeModelConfig: vi.fn(),
+        },
+        sandboxManager: undefined,
+      } as unknown as Parameters<typeof startMemoryService>[0];
+
+      await startMemoryService(mockConfig);
+
+      const statePath = path.join(memoryDir, '.extraction-state.json');
+      const state = await readExtractionState(statePath);
+      expect(state.runs).toHaveLength(1);
+      expect(state.runs[0].status).toBe('interrupted');
+      expect(state.runs[0].sessionIds).toEqual([]);
+
+      // A second start inside the throttle window must not rescan the whole
+      // history and re-spend the extraction budget.
+      vi.mocked(LocalAgentExecutor.create).mockClear();
+      await startMemoryService(mockConfig);
+
+      expect(LocalAgentExecutor.create).not.toHaveBeenCalled();
+      const afterSecondStart = await readExtractionState(statePath);
+      expect(afterSecondStart.runs).toHaveLength(1);
+    });
+
     it('emits feedback when new skills are created during extraction', async () => {
       const { startMemoryService } = await import('./memoryService.js');
       const { LocalAgentExecutor } = await import(
