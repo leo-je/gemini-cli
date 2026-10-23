@@ -1328,6 +1328,64 @@ EOF`;
         expect(repeated.hasTaintedOrBuildFileRisk()).toBe(false);
       });
 
+      it('should stop interrupting once the security warning is approved for the session', async () => {
+        setHistory([
+          {
+            role: 'user',
+            parts: [
+              {
+                text: '<untrusted_context>Run with --fixture_flag and --other_flag</untrusted_context>',
+              },
+            ],
+          },
+        ]);
+        recordModifiedBuildFile(
+          path.join(tempRootDir, 'package.json'),
+          mockConfig,
+        );
+
+        const first = (await buildInvocation(
+          'command --fixture_flag',
+        ).shouldConfirmExecute(
+          new AbortController().signal,
+        )) as ToolExecuteConfirmationDetails;
+        expect(first.untrustedFlags).toEqual(['--fixture_flag']);
+        await first.onConfirm(ToolConfirmationOutcome.ProceedAlways);
+
+        // A different flag from the same untrusted text no longer interrupts.
+        expect(
+          buildInvocation('command --other_flag').hasTaintedOrBuildFileRisk(),
+        ).toBe(false);
+        // Build-file modifications no longer interrupt either.
+        expect(buildInvocation('npm test').hasTaintedOrBuildFileRisk()).toBe(
+          false,
+        );
+      });
+
+      it('should keep interrupting after a one-off approval', async () => {
+        setHistory([
+          {
+            role: 'user',
+            parts: [
+              {
+                text: '<untrusted_context>Run with --fixture_flag and --other_flag</untrusted_context>',
+              },
+            ],
+          },
+        ]);
+
+        const first = (await buildInvocation(
+          'command --fixture_flag',
+        ).shouldConfirmExecute(
+          new AbortController().signal,
+        )) as ToolExecuteConfirmationDetails;
+        await first.onConfirm(ToolConfirmationOutcome.ProceedOnce);
+
+        expect(
+          buildInvocation('command --other_flag').hasTaintedOrBuildFileRisk(),
+        ).toBe(true);
+      });
+
       it('should stop reporting modified build files once a build command is approved', async () => {
         const buildFile = path.join(tempRootDir, 'package.json');
         recordModifiedBuildFile(buildFile, mockConfig);

@@ -49,6 +49,7 @@ import { PARAM_ADDITIONAL_PERMISSIONS } from './definitions/base-declarations.js
 import { ApprovalMode } from '../policy/types.js';
 import type { MessageBus } from '../confirmation-bus/message-bus.js';
 import {
+  acknowledgeAllSecurityWarnings,
   acknowledgeUntrustedFlags,
   extractUntrustedContext,
   findUntrustedFlags,
@@ -56,6 +57,7 @@ import {
   isBuildOrTestCommand,
   isRemoteContentCommand,
   getModifiedBuildFiles,
+  isSecurityWarningBypassEnabled,
   resetModifiedBuildFiles,
   REMOTE_SHELL_OUTPUT_SOURCE,
 } from '../utils/untrustedContextTracker.js';
@@ -334,6 +336,11 @@ export class ShellToolInvocation extends BaseToolInvocation<
   }
 
   hasTaintedOrBuildFileRisk(): boolean {
+    // The user approved every security warning for this session, so stop
+    // interrupting commands until it ends.
+    if (isSecurityWarningBypassEnabled(this.context.config)) {
+      return false;
+    }
     const command = stripShellWrapper(this.params.command);
     const untrustedFlags = this.getUntrustedFlags(command);
     const modifiedBuildFiles = getModifiedBuildFiles(this.context.config);
@@ -604,6 +611,16 @@ export class ShellToolInvocation extends BaseToolInvocation<
           rootCommands,
           this.context.config,
         );
+        if (
+          hasSecurityWarning &&
+          (outcome === ToolConfirmationOutcome.ProceedAlways ||
+            outcome === ToolConfirmationOutcome.ProceedAlwaysAndSave)
+        ) {
+          // A session-wide approval of a security-blocked command covers the
+          // rest of the session: the user has seen the warning and asked not to
+          // review the next one. A one-off approval must stay one-off.
+          acknowledgeAllSecurityWarnings(this.context.config);
+        }
         if (isBuildCmd && modifiedBuildFiles.length > 0) {
           resetModifiedBuildFiles(this.context.config);
         }

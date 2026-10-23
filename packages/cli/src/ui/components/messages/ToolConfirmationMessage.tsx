@@ -602,7 +602,8 @@ export const ToolConfirmationMessage: React.FC<
               .map((f) => `  • ${f}`)
               .join('\n') +
             `\nExecuting commands with flags sourced from untrusted input can execute arbitrary code on your machine.\n` +
-            `Carefully verify these flags before approving.`;
+            `Carefully verify these flags before approving.\n` +
+            `"Allow for this session" approves these flags and stops further security prompts until the session ends.`;
           securityWarnings = securityWarnings ? (
             <>
               {securityWarnings}
@@ -627,7 +628,8 @@ export const ToolConfirmationMessage: React.FC<
           const buildModWarningText =
             `⚠️ CAUTION: Build Configuration Was Recently Modified\n` +
             `Build file(s) (${modifiedBuildFileNames}) were modified earlier in this session. Running '${confirmationDetails.rootCommand}' will execute the updated build definitions.\n` +
-            `Ensure you trust all modifications made to build files before approving execution.`;
+            `Ensure you trust all modifications made to build files before approving execution.\n` +
+            `"Allow for this session" stops further security prompts until the session ends.`;
           securityWarnings = securityWarnings ? (
             <>
               {securityWarnings}

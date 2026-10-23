@@ -52,6 +52,7 @@ import { ShellTool } from '../tools/shell.js';
 import {
   resetAcknowledgedUntrustedFlags,
   resetModifiedBuildFiles,
+  resetSecurityWarningBypass,
 } from '../utils/untrustedContextTracker.js';
 import { WriteFileTool } from '../tools/write-file.js';
 import { WebFetchTool } from '../tools/web-fetch.js';
@@ -1939,6 +1940,7 @@ export class Config implements McpContext, AgentLoopContext {
     this.skillManager.reset();
     resetModifiedBuildFiles(this);
     resetAcknowledgedUntrustedFlags(this);
+    resetSecurityWarningBypass(this);
     this.latestApiRequest = undefined;
     this.lastModeSwitchTime = performance.now();
     this.compressionTruncationCounter = 0;

@@ -8,14 +8,17 @@ import { describe, it, expect, beforeAll } from 'vitest';
 import * as path from 'node:path';
 import type { Content } from '@google/genai';
 import {
+  acknowledgeAllSecurityWarnings,
   acknowledgeUntrustedFlags,
   extractUntrustedContext,
   findUntrustedFlags,
   getUnacknowledgedUntrustedFlags,
   isBuildOrTestCommand,
   isRemoteContentCommand,
+  isSecurityWarningBypassEnabled,
   REMOTE_SHELL_OUTPUT_SOURCE,
   resetAcknowledgedUntrustedFlags,
+  resetSecurityWarningBypass,
 } from './untrustedContextTracker.js';
 import { isSubpath } from './paths.js';
 import { initializeShellParsers } from './shell-utils.js';
@@ -467,6 +470,30 @@ done`;
         untrustedContext,
       );
       expect(detected).toContain('$TMPDIR/payload.sh');
+    });
+
+    describe('session-wide security warning approval', () => {
+      it('should remember an approval for every later warning', () => {
+        const sessionKey = {};
+        expect(isSecurityWarningBypassEnabled(sessionKey)).toBe(false);
+
+        acknowledgeAllSecurityWarnings(sessionKey);
+
+        expect(isSecurityWarningBypassEnabled(sessionKey)).toBe(true);
+
+        resetSecurityWarningBypass(sessionKey);
+
+        expect(isSecurityWarningBypassEnabled(sessionKey)).toBe(false);
+      });
+
+      it('should ignore session keys that are not objects', () => {
+        expect(() =>
+          acknowledgeAllSecurityWarnings(null as unknown as object),
+        ).not.toThrow();
+        expect(
+          isSecurityWarningBypassEnabled(undefined as unknown as object),
+        ).toBe(false);
+      });
     });
 
     describe('cli managed paths', () => {

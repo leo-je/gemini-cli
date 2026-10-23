@@ -737,10 +737,12 @@ const MODIFIED_BUILD_FILES_SYMBOL = Symbol('sessionModifiedBuildFiles');
 const ACKNOWLEDGED_UNTRUSTED_FLAGS_SYMBOL = Symbol(
   'sessionAcknowledgedUntrustedFlags',
 );
+const SECURITY_WARNING_BYPASS_SYMBOL = Symbol('sessionSecurityWarningBypass');
 
 interface SessionRecord {
   [MODIFIED_BUILD_FILES_SYMBOL]?: Set<string>;
   [ACKNOWLEDGED_UNTRUSTED_FLAGS_SYMBOL]?: Map<string, Set<string>>;
+  [SECURITY_WARNING_BYPASS_SYMBOL]?: boolean;
 }
 
 function hasSessionRecord(sessionKey: object): sessionKey is SessionRecord {
@@ -781,6 +783,36 @@ export function getModifiedBuildFiles(sessionKey: object): string[] {
 export function resetModifiedBuildFiles(sessionKey: object): void {
   if (hasSessionRecord(sessionKey)) {
     delete sessionKey[MODIFIED_BUILD_FILES_SYMBOL];
+  }
+}
+
+/**
+ * Records that the user approved every security-blocked action for the rest of
+ * the session. Untrusted-input and build-file warnings stop interrupting shell
+ * commands until the session ends.
+ */
+export function acknowledgeAllSecurityWarnings(sessionKey: object): void {
+  if (hasSessionRecord(sessionKey)) {
+    sessionKey[SECURITY_WARNING_BYPASS_SYMBOL] = true;
+  }
+}
+
+/**
+ * Returns true when the user approved all security warnings for this session.
+ */
+export function isSecurityWarningBypassEnabled(sessionKey: object): boolean {
+  return (
+    hasSessionRecord(sessionKey) &&
+    sessionKey[SECURITY_WARNING_BYPASS_SYMBOL] === true
+  );
+}
+
+/**
+ * Clears the session-wide security warning approval.
+ */
+export function resetSecurityWarningBypass(sessionKey: object): void {
+  if (hasSessionRecord(sessionKey)) {
+    delete sessionKey[SECURITY_WARNING_BYPASS_SYMBOL];
   }
 }
 
