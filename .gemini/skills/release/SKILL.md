@@ -86,7 +86,13 @@ release branches that already exist. Present the candidates and let the user pic
   new patch version rather than reusing a published one.
 - **`Publish to npm` succeeded but the version is missing** — check
   `registry.npmjs.org/<pkg>` before believing anything; propagation through the
-  npm CLI cache can lag by minutes.
+  npm CLI cache can lag by minutes. A brand-new version took ~40 seconds to
+  appear after a green run, so a `verify` that runs immediately can legitimately
+  report the previous `latest`. Re-poll before concluding anything broke.
+- **`watch` looks frozen** — never pipe it through `tail`/`head`: the pipe
+  buffers everything until the process exits, so a 12-minute build shows nothing
+  and looks hung. Run it bare, run it as a background job, or poll directly:
+  `curl -s "https://api.github.com/repos/<slug>/actions/runs?branch=releases/X.Y.Z&per_page=1"`
 
 ## Checklist
 
