@@ -14,6 +14,7 @@ import { extensionsCommand } from '../commands/extensions.js';
 import { skillsCommand } from '../commands/skills.js';
 import { hooksCommand } from '../commands/hooks.js';
 import { gemmaCommand } from '../commands/gemma.js';
+import { modelsCommand } from '../commands/models.js';
 import {
   setGeminiMdFilename as setServerGeminiMdFilename,
   resetGeminiMdFilename,
@@ -95,6 +96,7 @@ export interface CliArgs {
   experimentalAcp?: boolean;
   extensions: string[] | undefined;
   listExtensions: boolean | undefined;
+  listModels?: boolean | undefined;
   resume: string | typeof RESUME_LATEST | undefined;
   sessionFile?: string | undefined;
   sessionId: string | undefined;
@@ -188,6 +190,7 @@ export async function parseArguments(
         skillsCommand,
         hooksCommand,
         gemmaCommand,
+        modelsCommand,
       ];
 
       const subcommands = commandModules.flatMap((mod) => {
@@ -220,6 +223,9 @@ export async function parseArguments(
 
       const firstArg = argv._[0];
       if (typeof firstArg === 'string' && subcommands.includes(firstArg)) {
+        argv['isCommand'] = true;
+      }
+      if (argv['list-models']) {
         argv['isCommand'] = true;
       }
     }, true)
@@ -278,6 +284,7 @@ export async function parseArguments(
   yargsInstance.command(skillsCommand);
   yargsInstance.command(hooksCommand);
   yargsInstance.command(gemmaCommand);
+  yargsInstance.command(modelsCommand);
 
   yargsInstance
     .command('$0 [query..]', 'Launch Gemini CLI', (yargsInstance) =>
@@ -398,6 +405,10 @@ export async function parseArguments(
           alias: 'l',
           type: 'boolean',
           description: 'List all available extensions and exit.',
+        })
+        .option('list-models', {
+          type: 'boolean',
+          description: 'List available Gemini models and exit.',
         })
         .option('resume', {
           alias: 'r',
