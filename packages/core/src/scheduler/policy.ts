@@ -26,6 +26,8 @@ import {
 } from '../tools/tools.js';
 import { buildFilePathArgsPattern } from '../policy/utils.js';
 import { makeRelative } from '../utils/paths.js';
+import { coreEvents } from '../utils/events.js';
+import { acknowledgeAllSecurityWarnings } from '../utils/untrustedContextTracker.js';
 import { DiscoveredMCPTool, formatMcpToolName } from '../tools/mcp-tool.js';
 import { EDIT_TOOL_NAMES } from '../tools/tool-names.js';
 import type { ValidatingToolCall } from './types.js';
@@ -120,6 +122,26 @@ export async function updatePolicy(
   toolInvocation?: AnyToolInvocation,
 ): Promise<void> {
   const currentMode = context.config.getApprovalMode();
+
+  // "Allow everything for this session" is not a per-tool policy rule: it
+  // switches the whole session into YOLO mode. YOLO is in-memory only and is
+  // reset when the process exits, so it cannot leak into a future session the
+  // way a persisted rule could. Security warnings are silenced at the same time
+  // because the user has just asked not to be interrupted again.
+  if (outcome === ToolConfirmationOutcome.ProceedAlwaysSession) {
+    if (context.config.isYoloModeDisabled()) {
+      // The setting or an untrusted folder forbids YOLO. Falling back to a
+      // silent no-op would be worse than telling the user why nothing changed.
+      coreEvents.emitFeedback(
+        'error',
+        'Session-wide approval is unavailable because YOLO mode is disabled in this folder or by your settings.',
+      );
+      return;
+    }
+    context.config.setApprovalMode(ApprovalMode.YOLO);
+    acknowledgeAllSecurityWarnings(context.config);
+    return;
+  }
 
   // Mode Transitions (AUTO_EDIT)
   if (isAutoEditTransition(tool, outcome)) {

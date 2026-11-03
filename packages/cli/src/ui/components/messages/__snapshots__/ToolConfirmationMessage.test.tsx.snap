@@ -10,16 +10,16 @@ Apply this change?
 
 ● 1. Allow once                                                                   
   2. Allow for this session
-  3. Allow for this file in all future sessions ~/.gemini/policies/auto-saved.toml
-  4. Modify with external editor
-  5. No, suggest changes (esc)
+  3. Allow everything for this session
+  4. Allow for this file in all future sessions ~/.gemini/policies/auto-saved.toml
+  5. Modify with external editor
+  6. No, suggest changes (esc)
 "
 `;
 
 exports[`ToolConfirmationMessage > height allocation and layout > should expand to available height for large edit diffs 1`] = `
 "╭──────────────────────────────────────────────────────────────────────────────╮
-│ ... 10 hidden (Ctrl+O) ...                                                   │
-│  6 - const oldLine6 = true;                                                  │
+│ ... 11 hidden (Ctrl+O) ...                                                   │
 │  6 + const newLine6 = true;                                                  │
 │  7 - const oldLine7 = true;                                                  │
 │  7 + const newLine7 = true;                                                  │
@@ -52,17 +52,17 @@ exports[`ToolConfirmationMessage > height allocation and layout > should expand 
 ╰──────────────────────────────────────────────────────────────────────────────╯
 Apply this change?
 
-● 1. Allow once                 
+● 1. Allow once                       
   2. Allow for this session
-  3. Modify with external editor
-  4. No, suggest changes (esc)
+  3. Allow everything for this session
+  4. Modify with external editor
+  5. No, suggest changes (esc)
 "
 `;
 
 exports[`ToolConfirmationMessage > height allocation and layout > should expand to available height for large exec commands 1`] = `
 "╭──────────────────────────────────────────────────────────────────────────────╮
-│ ... 19 hidden (Ctrl+O) ...                                                   │
-│ echo "Line 20"                                                               │
+│ ... 20 hidden (Ctrl+O) ...                                                   │
 │ echo "Line 21"                                                               │
 │ echo "Line 22"                                                               │
 │ echo "Line 23"                                                               │
@@ -96,9 +96,10 @@ exports[`ToolConfirmationMessage > height allocation and layout > should expand 
 ╰──────────────────────────────────────────────────────────────────────────────╯
 Allow execution of [Shell]?
 
-● 1. Allow once               
+● 1. Allow once                       
   2. Allow for this session
-  3. No, suggest changes (esc)
+  3. Allow everything for this session
+  4. No, suggest changes (esc)
 "
 `;
 
@@ -112,9 +113,10 @@ exports[`ToolConfirmationMessage > should display multiple commands for exec typ
 ╰──────────────────────────────────────────────────────────────────────────────╯
 Allow execution of [Shell]?
 
-● 1. Allow once               
+● 1. Allow once                       
   2. Allow for this session
-  3. No, suggest changes (esc)
+  3. Allow everything for this session
+  4. No, suggest changes (esc)
 "
 `;
 
@@ -125,9 +127,10 @@ URLs to fetch:
  - https://raw.githubusercontent.com/google/gemini-react/main/README.md
 Do you want to proceed?
 
-● 1. Allow once               
+● 1. Allow once                       
   2. Allow for this session
-  3. No, suggest changes (esc)
+  3. Allow everything for this session
+  4. No, suggest changes (esc)
 "
 `;
 
@@ -135,9 +138,10 @@ exports[`ToolConfirmationMessage > should not display urls if prompt and url are
 "https://example.com
 Do you want to proceed?
 
-● 1. Allow once               
+● 1. Allow once                       
   2. Allow for this session
-  3. No, suggest changes (esc)
+  3. Allow everything for this session
+  4. No, suggest changes (esc)
 "
 `;
 
@@ -150,9 +154,10 @@ exports[`ToolConfirmationMessage > should render multiline shell scripts with co
 ╰──────────────────────────────────────────────────────────────────────────────╯
 Allow execution of [Shell]?
 
-● 1. Allow once               
+● 1. Allow once                       
   2. Allow for this session
-  3. No, suggest changes (esc)"
+  3. Allow everything for this session
+  4. No, suggest changes (esc)"
 `;
 
 exports[`ToolConfirmationMessage > should strip BiDi characters from MCP tool and server names 1`] = `
@@ -163,7 +168,8 @@ Allow execution of MCP tool "testtool" from server "testserver"?
 ● 1. Allow once                             
   2. Allow tool for this session
   3. Allow all server tools for this session
-  4. No, suggest changes (esc)
+  4. Allow everything for this session
+  5. No, suggest changes (esc)
 "
 `;
 
@@ -189,10 +195,11 @@ exports[`ToolConfirmationMessage > with folder trust > 'for edit confirmations' 
 ╰──────────────────────────────────────────────────────────────────────────────╯
 Apply this change?
 
-● 1. Allow once                 
+● 1. Allow once                       
   2. Allow for this session
-  3. Modify with external editor
-  4. No, suggest changes (esc)
+  3. Allow everything for this session
+  4. Modify with external editor
+  5. No, suggest changes (esc)
 "
 `;
 
@@ -213,9 +220,10 @@ exports[`ToolConfirmationMessage > with folder trust > 'for exec confirmations' 
 ╰──────────────────────────────────────────────────────────────────────────────╯
 Allow execution of [Shell]?
 
-● 1. Allow once               
+● 1. Allow once                       
   2. Allow for this session
-  3. No, suggest changes (esc)
+  3. Allow everything for this session
+  4. No, suggest changes (esc)
 "
 `;
 
@@ -232,9 +240,10 @@ exports[`ToolConfirmationMessage > with folder trust > 'for info confirmations' 
 "https://example.com
 Do you want to proceed?
 
-● 1. Allow once               
+● 1. Allow once                       
   2. Allow for this session
-  3. No, suggest changes (esc)
+  3. Allow everything for this session
+  4. No, suggest changes (esc)
 "
 `;
 
@@ -256,6 +265,7 @@ Allow execution of MCP tool "test-tool" from server "test-server"?
 ● 1. Allow once                             
   2. Allow tool for this session
   3. Allow all server tools for this session
-  4. No, suggest changes (esc)
+  4. Allow everything for this session
+  5. No, suggest changes (esc)
 "
 `;

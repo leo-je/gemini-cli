@@ -125,6 +125,11 @@ export function toPermissionOptions(
           name: 'Allow for this session',
           kind: 'allow_always',
         });
+        options.push({
+          optionId: ToolConfirmationOutcome.ProceedAlwaysSession,
+          name: 'Allow everything for this session',
+          kind: 'allow_always',
+        });
         if (enablePermanentToolApproval) {
           options.push({
             optionId: ToolConfirmationOutcome.ProceedAlwaysAndSave,

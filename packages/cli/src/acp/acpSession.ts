@@ -820,6 +820,7 @@ export class Session {
           case ToolConfirmationOutcome.ProceedAlwaysAndSave:
           case ToolConfirmationOutcome.ProceedAlwaysServer:
           case ToolConfirmationOutcome.ProceedAlwaysTool:
+          case ToolConfirmationOutcome.ProceedAlwaysSession:
           case ToolConfirmationOutcome.ModifyWithEditor:
             break;
           default: {

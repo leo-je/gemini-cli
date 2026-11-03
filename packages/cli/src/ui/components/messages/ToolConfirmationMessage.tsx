@@ -299,6 +299,13 @@ export const ToolConfirmationMessage: React.FC<
             value: ToolConfirmationOutcome.ProceedAlways,
             key: 'Allow for this session',
           });
+          if (!config.isYoloModeDisabled()) {
+            options.push({
+              label: 'Allow everything for this session',
+              value: ToolConfirmationOutcome.ProceedAlwaysSession,
+              key: 'Allow everything for this session',
+            });
+          }
           if (allowPermanentApproval) {
             options.push({
               label: 'Allow for this file in all future sessions',
@@ -371,6 +378,15 @@ export const ToolConfirmationMessage: React.FC<
           value: ToolConfirmationOutcome.ProceedAlways,
           key: `Allow for this session`,
         });
+        // A blanket, session-only approval. YOLO is in-memory, so this cannot
+        // persist into a future session; it is hidden when YOLO is disabled.
+        if (!config.isYoloModeDisabled()) {
+          options.push({
+            label: 'Allow everything for this session',
+            value: ToolConfirmationOutcome.ProceedAlwaysSession,
+            key: 'Allow everything for this session',
+          });
+        }
         // With untrusted flags the shell tool deliberately drops the persistent
         // policy update, so offering to save it would promise something that
         // never happens.
@@ -399,6 +415,13 @@ export const ToolConfirmationMessage: React.FC<
           value: ToolConfirmationOutcome.ProceedAlways,
           key: 'Allow for this session',
         });
+        if (!config.isYoloModeDisabled()) {
+          options.push({
+            label: 'Allow everything for this session',
+            value: ToolConfirmationOutcome.ProceedAlwaysSession,
+            key: 'Allow everything for this session',
+          });
+        }
         if (allowPermanentApproval) {
           options.push({
             label: 'Allow for all future sessions',
@@ -429,6 +452,13 @@ export const ToolConfirmationMessage: React.FC<
           value: ToolConfirmationOutcome.ProceedAlwaysServer,
           key: 'Allow all server tools for this session',
         });
+        if (!config.isYoloModeDisabled()) {
+          options.push({
+            label: 'Allow everything for this session',
+            value: ToolConfirmationOutcome.ProceedAlwaysSession,
+            key: 'Allow everything for this session',
+          });
+        }
         if (allowPermanentApproval) {
           options.push({
             label: 'Allow tool for all future sessions',

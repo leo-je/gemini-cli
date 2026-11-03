@@ -40,6 +40,7 @@ import { DiscoveredMCPTool } from '../tools/mcp-tool.js';
 import { Scheduler } from './scheduler.js';
 import { ToolErrorType } from '../tools/tool-error.js';
 import type { ToolRegistry } from '../tools/tool-registry.js';
+import { isSecurityWarningBypassEnabled } from '../utils/untrustedContextTracker.js';
 
 describe('policy.ts', () => {
   describe('checkPolicy', () => {
@@ -421,6 +422,75 @@ describe('policy.ts', () => {
           commandPrefix: ['ls'],
         }),
       );
+    });
+
+    it('should switch to YOLO for a session-wide approval without writing a rule', async () => {
+      const mockConfig = {
+        getApprovalMode: vi.fn().mockReturnValue(ApprovalMode.DEFAULT),
+        setApprovalMode: vi.fn(),
+        isYoloModeDisabled: vi.fn().mockReturnValue(false),
+        getSessionId: vi.fn().mockReturnValue('test-session-id'),
+      } as unknown as Mocked<Config>;
+      (mockConfig as unknown as { config: Config }).config =
+        mockConfig as Config;
+      const mockMessageBus = {
+        publish: vi.fn(),
+      } as unknown as Mocked<MessageBus>;
+      (mockConfig as unknown as { messageBus: MessageBus }).messageBus =
+        mockMessageBus;
+      const tool = { name: 'run_shell_command' } as AnyDeclarativeTool;
+      const details: ToolExecuteConfirmationDetails = {
+        type: 'exec',
+        command: 'ls -la',
+        rootCommand: 'ls',
+        rootCommands: ['ls'],
+        title: 'Shell',
+        onConfirm: vi.fn(),
+      };
+
+      await updatePolicy(
+        tool,
+        ToolConfirmationOutcome.ProceedAlwaysSession,
+        details,
+        mockConfig,
+        mockMessageBus,
+      );
+
+      // The whole session is switched, so no per-tool rule is persisted.
+      expect(mockConfig.setApprovalMode).toHaveBeenCalledWith(
+        ApprovalMode.YOLO,
+      );
+      expect(mockMessageBus.publish).not.toHaveBeenCalled();
+      // Later security warnings stay silent for the rest of the session.
+      expect(isSecurityWarningBypassEnabled(mockConfig)).toBe(true);
+    });
+
+    it('should not switch modes when YOLO is disabled', async () => {
+      const mockConfig = {
+        getApprovalMode: vi.fn().mockReturnValue(ApprovalMode.DEFAULT),
+        setApprovalMode: vi.fn(),
+        isYoloModeDisabled: vi.fn().mockReturnValue(true),
+        getSessionId: vi.fn().mockReturnValue('test-session-id'),
+      } as unknown as Mocked<Config>;
+      (mockConfig as unknown as { config: Config }).config =
+        mockConfig as Config;
+      const mockMessageBus = {
+        publish: vi.fn(),
+      } as unknown as Mocked<MessageBus>;
+      (mockConfig as unknown as { messageBus: MessageBus }).messageBus =
+        mockMessageBus;
+      const tool = { name: 'run_shell_command' } as AnyDeclarativeTool;
+
+      await updatePolicy(
+        tool,
+        ToolConfirmationOutcome.ProceedAlwaysSession,
+        undefined,
+        mockConfig,
+        mockMessageBus,
+      );
+
+      expect(mockConfig.setApprovalMode).not.toHaveBeenCalled();
+      expect(mockMessageBus.publish).not.toHaveBeenCalled();
     });
 
     it('should handle MCP policy updates (server scope)', async () => {

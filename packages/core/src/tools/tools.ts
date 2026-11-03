@@ -1109,6 +1109,12 @@ export enum ToolConfirmationOutcome {
   ProceedAlwaysAndSave = 'proceed_always_and_save',
   ProceedAlwaysServer = 'proceed_always_server',
   ProceedAlwaysTool = 'proceed_always_tool',
+  /**
+   * Allow every tool for the rest of this session without further
+   * confirmations. Implemented by switching to YOLO approval mode, which is an
+   * in-memory state that is never persisted to disk.
+   */
+  ProceedAlwaysSession = 'proceed_always_session',
   ModifyWithEditor = 'modify_with_editor',
   Cancel = 'cancel',
 }

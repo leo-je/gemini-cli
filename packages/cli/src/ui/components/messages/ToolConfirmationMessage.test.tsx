@@ -43,6 +43,7 @@ describe('ToolConfirmationMessage', () => {
 
   const mockConfig = {
     isTrustedFolder: () => true,
+    isYoloModeDisabled: () => false,
     getIdeMode: () => false,
     getDisableAlwaysAllow: () => false,
     getApprovalMode: () => 'default',
@@ -438,6 +439,7 @@ describe('ToolConfirmationMessage', () => {
       it('should show "allow always" when folder is trusted', async () => {
         const mockConfig = {
           isTrustedFolder: () => true,
+          isYoloModeDisabled: () => false,
           getIdeMode: () => false,
           getDisableAlwaysAllow: () => false,
           getApprovalMode: () => 'default',
@@ -461,6 +463,7 @@ describe('ToolConfirmationMessage', () => {
       it('should NOT show "allow always" when folder is untrusted', async () => {
         const mockConfig = {
           isTrustedFolder: () => false,
+          isYoloModeDisabled: () => false,
           getIdeMode: () => false,
           getDisableAlwaysAllow: () => false,
           getApprovalMode: () => 'default',
@@ -484,6 +487,55 @@ describe('ToolConfirmationMessage', () => {
     });
   });
 
+  describe('session-wide approval option', () => {
+    const execConfirmationDetails: SerializableConfirmationDetails = {
+      type: 'exec',
+      title: 'Confirm Shell Command',
+      command: 'echo "hello"',
+      rootCommand: 'echo',
+      rootCommands: ['echo'],
+    };
+
+    const renderWithYolo = async (yoloDisabled: boolean) => {
+      const mockConfig = {
+        isTrustedFolder: () => true,
+        isYoloModeDisabled: () => yoloDisabled,
+        getIdeMode: () => false,
+        getDisableAlwaysAllow: () => false,
+        getApprovalMode: () => 'default',
+      } as unknown as Config;
+      return renderWithProviders(
+        <ToolConfirmationMessage
+          callId="test-session-approval"
+          confirmationDetails={execConfirmationDetails}
+          config={mockConfig}
+          getPreferredEditor={vi.fn()}
+          availableTerminalHeight={30}
+          terminalWidth={80}
+          toolName="run_shell_command"
+        />,
+      );
+    };
+
+    it('should offer a session-wide approval when YOLO is available', async () => {
+      const { lastFrame, unmount } = await renderWithYolo(false);
+
+      const frame = lastFrame();
+      expect(frame).toContain('Allow for this session');
+      expect(frame).toContain('Allow everything for this session');
+      unmount();
+    });
+
+    it('should hide the session-wide approval when YOLO is disabled', async () => {
+      const { lastFrame, unmount } = await renderWithYolo(true);
+
+      const frame = lastFrame();
+      expect(frame).toContain('Allow for this session');
+      expect(frame).not.toContain('Allow everything for this session');
+      unmount();
+    });
+  });
+
   describe('enablePermanentToolApproval setting', () => {
     const editConfirmationDetails: SerializableConfirmationDetails = {
       type: 'edit',
@@ -498,6 +550,7 @@ describe('ToolConfirmationMessage', () => {
     it('should NOT show "Allow for all future sessions" when setting is false (default)', async () => {
       const mockConfig = {
         isTrustedFolder: () => true,
+        isYoloModeDisabled: () => false,
         getIdeMode: () => false,
         getDisableAlwaysAllow: () => false,
         getApprovalMode: () => 'default',
@@ -526,6 +579,7 @@ describe('ToolConfirmationMessage', () => {
     it('should show "Allow for all future sessions" when trusted', async () => {
       const mockConfig = {
         isTrustedFolder: () => true,
+        isYoloModeDisabled: () => false,
         getIdeMode: () => false,
         getDisableAlwaysAllow: () => false,
         getApprovalMode: () => 'default',
@@ -569,6 +623,7 @@ describe('ToolConfirmationMessage', () => {
     it('should show "Modify with external editor" when NOT in IDE mode', async () => {
       const mockConfig = {
         isTrustedFolder: () => true,
+        isYoloModeDisabled: () => false,
         getIdeMode: () => false,
         getDisableAlwaysAllow: () => false,
         getApprovalMode: () => 'default',
@@ -601,6 +656,7 @@ describe('ToolConfirmationMessage', () => {
     it('should show "Modify with external editor" when in IDE mode but diffing is NOT enabled', async () => {
       const mockConfig = {
         isTrustedFolder: () => true,
+        isYoloModeDisabled: () => false,
         getIdeMode: () => true,
         getDisableAlwaysAllow: () => false,
         getApprovalMode: () => 'default',
@@ -633,6 +689,7 @@ describe('ToolConfirmationMessage', () => {
     it('should NOT show "Modify with external editor" when in IDE mode AND diffing is enabled', async () => {
       const mockConfig = {
         isTrustedFolder: () => true,
+        isYoloModeDisabled: () => false,
         getIdeMode: () => true,
         getDisableAlwaysAllow: () => false,
         getApprovalMode: () => 'default',
