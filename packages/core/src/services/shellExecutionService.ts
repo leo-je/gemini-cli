@@ -1834,13 +1834,14 @@ export class ShellExecutionService {
    * @param sessionId Optional session ID for process history tracking.
    * @param command Optional command string for display.
    * @param tempDir Optional temporary directory path owned by this execution to clean up on exit.
+   * @returns true if the process was successfully moved to the background; false otherwise.
    */
   static background(
     pid: number,
     sessionId?: string,
     command?: string,
     tempDir?: string,
-  ): void {
+  ): boolean {
     const activePty = this.activePtys.get(pid);
     const activeChild = this.activeChildProcesses.get(pid);
 
@@ -1865,15 +1866,25 @@ export class ShellExecutionService {
           .rm(resolvedTempDir, { recursive: true, force: true })
           .catch(() => {});
       }
-      return;
+      return false;
+    }
+
+    if (this.backgroundLogPids.has(pid)) {
+      return false;
+    }
+
+    const backgrounded = ExecutionLifecycleService.background(pid);
+    if (!backgrounded) {
+      if (resolvedTempDir) {
+        fsPromises
+          .rm(resolvedTempDir, { recursive: true, force: true })
+          .catch(() => {});
+      }
+      return false;
     }
 
     if (resolvedTempDir) {
       this.backgroundTempDirs.set(pid, resolvedTempDir);
-    }
-
-    if (this.backgroundLogPids.has(pid)) {
-      return;
     }
 
     const MAX_BACKGROUND_PROCESS_HISTORY_SIZE = 100;
@@ -1921,7 +1932,7 @@ export class ShellExecutionService {
 
     this.backgroundLogPids.add(pid);
 
-    ExecutionLifecycleService.background(pid);
+    return true;
   }
 
   static subscribe(

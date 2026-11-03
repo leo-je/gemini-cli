@@ -2208,6 +2208,7 @@ export class Config implements McpContext, AgentLoopContext {
 
   resetTurn(): void {
     this.modelAvailabilityService.resetTurn();
+    this._activeModel = this.model;
   }
 
   /** Resets billing state (overageStrategy, creditsNotificationShown) once per user prompt. */
