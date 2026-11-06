@@ -23,6 +23,22 @@ Run `node .gemini/skills/release/scripts/release.mjs latest` first: it prints th
 published versions, three candidate numbers from the current `latest`, and the
 release branches that already exist. Present the candidates and let the user pick.
 
+## Branch model
+
+- **Source branches** (`new-version-openai`, `rep-main`, …) are where code is
+  written, reviewed and committed.
+- **`releases/<version>` branches exist only to be pushed**, because pushing one
+  is what starts `build-release-binaries.yml`. Nothing but the version stamp
+  belongs on them: **never fix or change code on a release branch**. Land the
+  fix on the source branch, then cut the release branch from it (or bring the
+  commit over) and push.
+- Before that push, stamp the app version to `<version>` — the 8 `package.json`
+  files (root + `cli`, `core`, `a2a-server`, `sdk`, `devtools`, `test-utils`,
+  `vscode-ide-companion`) plus the matching `package-lock.json` entries (9 lines;
+  9 files, 17 insertions / 17 deletions in total). Pushing first and bumping
+  later publishes a second version from the same branch and can re-upload the
+  previous release's assets.
+
 ## Steps
 
 1. **Preflight** (read-only):
@@ -62,6 +78,10 @@ release branches that already exist. Present the candidates and let the user pic
   dependency pins move).
 - **Never bump the same version twice.** npm refuses to overwrite a published
   version, so a mis-bumped release can only be superseded, not fixed.
+- **Never change code on a `releases/<version>` branch.** Those branches are
+  push-only triggers for the GitHub build; a fix committed there never reaches the
+  source branch and makes the next release branch diverge. Write the fix on the
+  source branch first.
 - **Never create the tag by hand.** The workflow creates `vX.Y.Z` and the GitHub
   release from the branch after every platform builds.
 - **Do not touch `sandboxImageUri`** in the workspace manifests; it intentionally
