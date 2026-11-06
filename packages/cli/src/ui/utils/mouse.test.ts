@@ -48,6 +48,32 @@ describe('mouse utils', () => {
       });
     });
 
+    it('parses a release that still carries the motion bit', () => {
+      // Button 3 + Move(32) = 35: some terminals report the release of a
+      // dragged button this way. It used to decode as `move`, so the matching
+      // `left-release` never arrived.
+      const result = parseSGRMouseEvent(`${ESC}[<35;10;20m`);
+      expect(result).not.toBeNull();
+      expect(result!.event.name).toBe('left-release');
+      expect(result!.event.button).toBe('left');
+    });
+
+    it('parses the legacy "no button" release code', () => {
+      const result = parseSGRMouseEvent(`${ESC}[<3;10;20m`);
+      expect(result).not.toBeNull();
+      expect(result!.event.name).toBe('left-release');
+      expect(result!.event.button).toBe('left');
+    });
+
+    it('parses middle and right releases', () => {
+      expect(parseSGRMouseEvent(`${ESC}[<1;10;20m`)!.event.name).toBe(
+        'middle-release',
+      );
+      expect(parseSGRMouseEvent(`${ESC}[<2;10;20m`)!.event.name).toBe(
+        'right-release',
+      );
+    });
+
     it('parses SGR with modifiers', () => {
       // Button 0 + Shift(4) + Meta(8) + Ctrl(16) = 0 + 4 + 8 + 16 = 28
       const input = `${ESC}[<28;10;20M`;
