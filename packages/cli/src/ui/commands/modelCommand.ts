@@ -81,8 +81,17 @@ const setModelCommand: SlashCommand = {
     }
 
     const modelName = nonFlagParts[0];
-    const validModels = getValidModelNames(context);
-    if (!validModels.has(modelName)) {
+    // The allowlist is Gemini-shaped: built-in Gemini models, the configured
+    // aliases and the settings-declared definitions. An OpenAI-compatible
+    // endpoint serves models this CLI cannot enumerate, so validating against
+    // it would reject every endpoint-served name (`gpt-4o`, for instance) that
+    // `/model list` and `/provider` are meant to install. Keep the validation
+    // on the Gemini paths, which is where upstream added it.
+    const config = context.services.agentContext?.config;
+    if (
+      !isOpenAiBackend(config) &&
+      !getValidModelNames(context).has(modelName)
+    ) {
       context.ui.addItem({
         type: MessageType.ERROR,
         text: `Invalid model "${modelName}". Run /model to view and select from available models.`,
@@ -102,6 +111,13 @@ const setModelCommand: SlashCommand = {
     }
   },
   completion: async (context: CommandContext, partialArg: string) => {
+    // Same reason as the action: the Gemini allowlist cannot name what an
+    // OpenAI-compatible endpoint serves, so offering it there would complete to
+    // names the endpoint does not have. `/model list` owns that flow.
+    const config = context.services.agentContext?.config;
+    if (isOpenAiBackend(config)) {
+      return [];
+    }
     const validModels = Array.from(getValidModelNames(context));
     return validModels.filter((model) => model.startsWith(partialArg));
   },

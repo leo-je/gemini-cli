@@ -208,6 +208,9 @@ describe('modelCommand', () => {
       const mockSetModel = vi.fn();
       mockContext.services.agentContext = {
         setModel: mockSetModel,
+        getContentGeneratorConfig: vi
+          .fn()
+          .mockReturnValue({ authType: AuthType.USE_GEMINI }),
         get config() {
           return this;
         },
@@ -277,6 +280,57 @@ describe('modelCommand', () => {
       expect(suggestions).toContain('gemini-2.5-pro');
       expect(suggestions).toContain('gemini-2.5-flash');
       expect(suggestions?.every((s) => s.startsWith('gemini-2.5'))).toBe(true);
+    });
+
+    // The Gemini allowlist upstream added cannot enumerate what an
+    // OpenAI-compatible endpoint serves, so it must not gate that mode. These
+    // cases pin the fork's behaviour across the merge.
+    it('should accept an endpoint-served model name in OpenAI mode', async () => {
+      const setCommand = modelCommand.subCommands?.find(
+        (c) => c.name === 'set',
+      );
+      const mockSetModel = vi.fn();
+      mockContext.services.agentContext = {
+        setModel: mockSetModel,
+        getUsageStatisticsEnabled: vi.fn().mockReturnValue(false),
+        getContentGeneratorConfig: vi
+          .fn()
+          .mockReturnValue({ authType: AuthType.USE_OPENAI }),
+        getActiveOpenAiProviderId: vi.fn().mockReturnValue('openrouter'),
+        get config() {
+          return this;
+        },
+      } as unknown as Config;
+
+      await setCommand?.action?.(mockContext, 'gpt-4o');
+
+      expect(mockSetModel).toHaveBeenCalledWith('gpt-4o', true);
+      expect(mockContext.ui.addItem).not.toHaveBeenCalledWith(
+        expect.objectContaining({
+          text: expect.stringContaining('Invalid model'),
+        }),
+      );
+    });
+
+    it('should offer no Gemini completions in OpenAI mode', async () => {
+      const setCommand = modelCommand.subCommands?.find(
+        (c) => c.name === 'set',
+      );
+      mockContext.services.agentContext = {
+        getContentGeneratorConfig: vi
+          .fn()
+          .mockReturnValue({ authType: AuthType.USE_OPENAI }),
+        get config() {
+          return this;
+        },
+      } as unknown as Config;
+
+      const suggestions = await setCommand?.completion?.(
+        mockContext,
+        'gemini-2.5',
+      );
+
+      expect(suggestions).toEqual([]);
     });
   });
 
