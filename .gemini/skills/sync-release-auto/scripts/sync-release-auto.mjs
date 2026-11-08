@@ -1203,6 +1203,21 @@ async function cmdRun(root, flags) {
     if (unexpected.length > 0) {
       abort(`version stamp touched non-manifest files: ${unexpected.join(', ')}`);
     }
+    // Touching only the right *files* is not enough: a manifest edit that dropped
+    // a dependency would also pass that check. Every changed line must be a
+    // version field, which is the shape the release skill documents as 17±17.
+    const changedLines = git(['diff', '-U0', '--', '*.json'], { cwd: releasePath })
+      .split('\n')
+      .filter((line) => /^[+-]/.test(line) && !/^(\+\+\+|---)/.test(line));
+    const notVersion = changedLines.filter((line) => !/^[+-]\s*"version":\s*"/.test(line));
+    if (notVersion.length > 0) {
+      abort(
+        `version stamp changed something other than version fields:\n  ${notVersion
+          .slice(0, 10)
+          .join('\n  ')}`,
+      );
+    }
+    ok(`every changed line is a version field (${changedLines.length} lines)`);
     git(['add', '-A'], { cwd: releasePath });
     git(['commit', '-m', `chore(release): bump version to ${check.nextVersion}`], {
       cwd: releasePath,
