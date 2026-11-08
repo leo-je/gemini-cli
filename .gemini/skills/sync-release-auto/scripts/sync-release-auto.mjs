@@ -1279,12 +1279,26 @@ async function cmdRun(root, flags) {
     // branch never carries a release version.
     try {
       git(['push', 'origin', `${mergeCommit}:refs/heads/${SOURCE_BRANCH}`], { cwd: releasePath });
-      ok(`fast-forwarded ${SOURCE_BRANCH} to the synced merge ${mergeCommit.slice(0, 9)}`);
+      ok(`pushed the synced merge to origin/${SOURCE_BRANCH}`);
     } catch (error) {
       warn(
-        `could not fast-forward ${SOURCE_BRANCH} (it moved during the run?): ${
+        `could not fast-forward origin/${SOURCE_BRANCH} (it moved during the run?): ${
           error instanceof Error ? error.message.split('\n')[0] : error
         }`,
+      );
+    }
+    // The *local* branch has to move too. `check` counts
+    // `new-version-openai..upstream/main`, so a local branch left behind would
+    // make the next run re-merge the same delta and publish another -pre.N
+    // forever. A fast-forward only, never a reset.
+    try {
+      git(['fetch', 'origin', '--quiet'], { cwd: root });
+      git(['merge', '--ff-only', `origin/${SOURCE_BRANCH}`], { cwd: root });
+      ok(`fast-forwarded the local ${SOURCE_BRANCH} to the synced merge`);
+    } catch {
+      warn(
+        `local ${SOURCE_BRANCH} could not fast-forward; the next run may re-merge. ` +
+          `Fix with: git checkout ${SOURCE_BRANCH} && git merge --ff-only origin/${SOURCE_BRANCH}`,
       );
     }
 
