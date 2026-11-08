@@ -98,11 +98,19 @@ function abort(message) {
   throw new Abort(message);
 }
 
+// execFileSync's default maxBuffer is 1MB, and this repository tracks files
+// larger than that (memory-test fixtures, the vendored ripgrep binaries). A
+// blob over the limit makes `git show` fail with ENOBUFS, which the
+// allowFailure paths would silently turn into an empty file — so the limit is
+// raised well past any file the repo is likely to track.
+const MAX_BUFFER = 256 * 1024 * 1024;
+
 function run(cmd, args, { cwd, allowFailure = false, env, input } = {}) {
   try {
     return execFileSync(cmd, args, {
       cwd,
       encoding: 'utf8',
+      maxBuffer: MAX_BUFFER,
       stdio: [input === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe'],
       input,
       env: env ? { ...process.env, ...env } : process.env,
@@ -134,16 +142,41 @@ function runCapture(cmd, args, { cwd, env } = {}) {
       stdout: execFileSync(cmd, args, {
         cwd,
         encoding: 'utf8',
+        maxBuffer: MAX_BUFFER,
         stdio: ['ignore', 'pipe', 'pipe'],
         env: env ? { ...process.env, ...env } : process.env,
       }),
     };
   } catch (error) {
+    // ENOBUFS means the output exceeded even the raised limit; surfacing it as
+    // status 1 with no stdout would be indistinguishable from a normal merge.
+    if (error.code === 'ENOBUFS') {
+      throw new Error(`${cmd} ${args.join(' ')} produced more output than MAX_BUFFER`);
+    }
     return {
       status: typeof error.status === 'number' ? error.status : 1,
       stdout: error.stdout ?? '',
       stderr: error.stderr ?? '',
     };
+  }
+}
+
+/**
+ * True when `ref` is an ancestor of (or equal to) `other`.
+ *
+ * `git merge-base --is-ancestor` signals its answer through the exit status,
+ * which the string-returning helpers cannot express: with allowFailure they
+ * return '' for both "yes" and "no".
+ */
+function isAncestor(cwd, ref, other) {
+  try {
+    execFileSync('git', ['merge-base', '--is-ancestor', ref, other], {
+      cwd,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    return true;
+  } catch {
+    return false;
   }
 }
 
@@ -371,7 +404,14 @@ function policyFor(path) {
   for (const entry of CONFLICT_POLICIES) {
     if (entry.match.test(path)) return entry;
   }
-  return { policy: 'union', reason: 'unclassified; keep both sides and rely on the test gate' };
+  // Unclassified paths deliberately abort rather than defaulting to union.
+  // `union` writes code with no conflict markers, so a blind default would
+  // silently produce invalid source in exactly the case nobody has thought
+  // about yet. Stopping is always safe: nothing has been pushed at that point.
+  return {
+    policy: 'abort',
+    reason: 'unclassified path; add a rule to CONFLICT_POLICIES',
+  };
 }
 
 /** Deep-union of two parsed JSON documents. `preferred` wins on scalars. */
@@ -407,8 +447,37 @@ function trailingNewline(path) {
 }
 
 /**
+ * Read one merge stage's content for a path.
+ *
+ * Returns `null` when the stage does not exist, which is meaningful: a
+ * modify/delete conflict has no stage 3, and treating that as an empty file is
+ * how a deleted file used to come back to life. Genuine read errors throw rather
+ * than turn into empty content.
+ */
+function readStage(worktree, stage, path) {
+  try {
+    return execFileSync('git', ['show', `:${stage}:${path}`], {
+      cwd: worktree,
+      encoding: 'utf8',
+      maxBuffer: MAX_BUFFER,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+  } catch (error) {
+    if (error.code === 'ENOBUFS') {
+      throw new Error(`${path}: stage ${stage} is larger than MAX_BUFFER`);
+    }
+    // Exit 128 with "does not exist in <stage>" is the normal absent-stage case.
+    if (error.status === 128) return null;
+    throw new Error(`cannot read stage ${stage} of ${path}: ${error.message}`);
+  }
+}
+
+/**
  * Resolve every unmerged path in the worktree. Returns the decisions taken so
  * the caller can report them and refuse to push on anything but a clean result.
+ *
+ * Throws on a conflict it cannot resolve soundly: an unattended pipeline must
+ * stop rather than commit a guess.
  */
 function resolveConflicts(worktree) {
   const conflicted = git(['diff', '--name-only', '--diff-filter=U'], { cwd: worktree })
@@ -419,54 +488,79 @@ function resolveConflicts(worktree) {
   for (const path of conflicted) {
     const { policy, reason } = policyFor(path);
     const target = join(worktree, path);
+    const ours = readStage(worktree, 2, path);
+    const theirs = readStage(worktree, 3, path);
     let applied = policy;
+
+    // A modify/delete conflict is a policy question, not a text merge: the
+    // absent side simply means "deleted".
+    if (ours === null || theirs === null) {
+      const keep = policy === 'theirs' ? theirs : ours;
+      if (keep === null) {
+        git(['rm', '--quiet', '--', path], { cwd: worktree });
+        applied = `${policy} (accepted the deletion)`;
+      } else {
+        git(['checkout', '--ours', '--', path], { cwd: worktree });
+        applied = `${policy} (kept the surviving side)`;
+      }
+      git(['add', '--', path], { cwd: worktree });
+      decisions.push({ path, policy: applied, reason });
+      log(`    ${path} → ${applied}`);
+      continue;
+    }
 
     if (policy === 'ours') {
       git(['checkout', '--ours', '--', path], { cwd: worktree });
     } else if (policy === 'theirs') {
       git(['checkout', '--theirs', '--', path], { cwd: worktree });
+    } else if (policy === 'abort') {
+      abort(
+        `${path} conflicted and has no resolution policy (${reason}). ` +
+          `Add a rule to CONFLICT_POLICIES for it, then re-run.`,
+      );
     } else if (policy === 'union') {
-      // A three-way union keeps both sides' hunks and drops the markers. This is
-      // the skill's documented default posture: both features belong.
-      const base = join(worktree, `.merge-base.${basename(path)}`);
-      const ours = join(worktree, `.merge-ours.${basename(path)}`);
-      const theirs = join(worktree, `.merge-theirs.${basename(path)}`);
-      for (const [stage, out] of [
-        [1, base],
-        [2, ours],
-        [3, theirs],
-      ]) {
-        const blob = git(['show', `:${stage}:${path}`], { cwd: worktree, allowFailure: true });
-        writeFileSync(out, blob === '' ? '' : `${blob}\n`);
+      // A three-way union keeps both sides' hunks. It is only sound for files
+      // where juxtaposition is harmless — it writes code with no conflict
+      // markers, so an overlap in real source produces invalid syntax.
+      const suffix = `${process.pid}-${path.replaceAll('/', '_')}`;
+      const base = join(worktree, `.merge-base.${suffix}`);
+      const oursFile = join(worktree, `.merge-ours.${suffix}`);
+      const theirsFile = join(worktree, `.merge-theirs.${suffix}`);
+      const baseContent = readStage(worktree, 1, path);
+      writeFileSync(base, baseContent ?? '');
+      writeFileSync(oursFile, ours);
+      writeFileSync(theirsFile, theirs);
+      let merged;
+      try {
+        merged = runCapture('git', ['merge-file', '--union', '-p', oursFile, base, theirsFile], {
+          cwd: worktree,
+        });
+      } finally {
+        for (const stale of [base, oursFile, theirsFile]) rmSync(stale, { force: true });
       }
-      const merged = runCapture('git', ['merge-file', '--union', '-p', ours, base, theirs], {
-        cwd: worktree,
-      });
-      if (merged.stdout === '') {
-        // No usable union body: keep the fork side rather than write an empty file.
-        applied = 'union-ours-fallback';
-        writeFileSync(target, readFileSync(ours, 'utf8'));
-      } else {
-        writeFileSync(target, `${merged.stdout}\n`);
+      // An empty union body for a non-empty file means the merge went wrong;
+      // never write that out as if it were the resolution.
+      const union = merged.stdout;
+      if (union.trim() === '' && (ours.trim() !== '' || theirs.trim() !== '')) {
+        abort(`${path}: the union merge produced no content; refusing to write an empty file`);
       }
-      for (const stale of [base, ours, theirs]) rmSync(stale, { force: true });
+      writeFileSync(target, `${union}\n`);
     } else if (policy === 'json') {
-      const parseStage = (stage) => {
-        const blob = git(['show', `:${stage}:${path}`], { cwd: worktree, allowFailure: true });
+      const parseBlob = (blob) => {
         try {
-          return blob ? JSON.parse(blob) : null;
+          return JSON.parse(blob);
         } catch {
           return null;
         }
       };
-      const mine = parseStage(2);
-      const theirs = parseStage(3);
-      if (!mine || !theirs) {
+      const mine = parseBlob(ours);
+      const upstream = parseBlob(theirs);
+      if (!mine || !upstream) {
         // Unparseable side: keep the fork copy rather than corrupt the manifest.
         git(['checkout', '--ours', '--', path], { cwd: worktree });
         applied = 'json-ours-fallback';
       } else {
-        const union = mergeJsonValues(mine, theirs, 'ours');
+        const union = mergeJsonValues(mine, upstream, 'ours');
         if (typeof mine.version === 'string') union.version = mine.version;
         writeFileSync(target, `${JSON.stringify(union, null, 2)}${trailingNewline(target)}`);
       }
@@ -903,7 +997,7 @@ async function reportRun(slug, run) {
 // ---------------------------------------------------------------------------
 
 function lockFile(root) {
-  return join(root, '.git', 'dsh-sync-release.lock');
+  return join(root, '.git', 'automation.lock');
 }
 
 function acquireLock(root) {
@@ -1040,7 +1134,14 @@ async function cmdRun(root, flags) {
           ok(`fast-forwarded ${MIRROR_BRANCH} to origin/${MIRROR_BRANCH}`);
           mirrorChanged = true;
         } catch {
-          warn(`local ${MIRROR_BRANCH} cannot fast-forward to origin; leaving it alone`);
+          // Continuing here would merge upstream on top of a stale mirror and
+          // then push it, which a non-fast-forward push rejects only after the
+          // whole expensive run. Stop now instead.
+          abort(
+            `local ${MIRROR_BRANCH} has diverged from origin/${MIRROR_BRANCH} and cannot ` +
+              `fast-forward. Resolve it first:\n` +
+              `  git branch -f ${MIRROR_BRANCH} origin/${MIRROR_BRANCH}`,
+          );
         }
       }
     }
@@ -1287,18 +1388,30 @@ async function cmdRun(root, flags) {
         }`,
       );
     }
-    // The *local* branch has to move too. `check` counts
+    // The *local* branch has to move too: `check` counts
     // `new-version-openai..upstream/main`, so a local branch left behind would
     // make the next run re-merge the same delta and publish another -pre.N
-    // forever. A fast-forward only, never a reset.
+    // forever.
+    //
+    // `git merge --ff-only` fast-forwards whatever HEAD happens to be, and it
+    // does not require HEAD to be the branch being synced. The main checkout is
+    // often left on another branch (the sync skill points out that `rep-main` is
+    // the fork's default branch), and both `rep-main` and `main` are ancestors
+    // of the source branch — so a blind fast-forward here would silently drag
+    // that other branch onto the dev line. Move the ref directly instead, which
+    // never touches HEAD.
     try {
       git(['fetch', 'origin', '--quiet'], { cwd: root });
-      git(['merge', '--ff-only', `origin/${SOURCE_BRANCH}`], { cwd: root });
+      const upstreamTip = git(['rev-parse', `origin/${SOURCE_BRANCH}`], { cwd: root });
+      if (!isAncestor(root, `refs/heads/${SOURCE_BRANCH}`, upstreamTip)) {
+        throw new Error('the remote source branch is not a descendant of the local one');
+      }
+      git(['update-ref', `refs/heads/${SOURCE_BRANCH}`, upstreamTip], { cwd: root });
       ok(`fast-forwarded the local ${SOURCE_BRANCH} to the synced merge`);
     } catch {
       warn(
         `local ${SOURCE_BRANCH} could not fast-forward; the next run may re-merge. ` +
-          `Fix with: git checkout ${SOURCE_BRANCH} && git merge --ff-only origin/${SOURCE_BRANCH}`,
+          `Fix with: git update-ref refs/heads/${SOURCE_BRANCH} origin/${SOURCE_BRANCH}`,
       );
     }
 

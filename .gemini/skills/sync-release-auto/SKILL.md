@@ -92,7 +92,16 @@ Applied per path; `ours` is the fork side, `theirs` is upstream.
 | `package-lock.json` | theirs, then reconciled | rebuilt from the merged manifests |
 | `package.json`, `packages/*/package.json` | json union | keep both sides' dependency keys; the fork version wins |
 | `config.ts`, `gemini.tsx`, `AppContainer.tsx`, `contentGenerator.ts` | union | both sides append; keep both |
-| anything else | union | unclassified: keep both and let the test gate judge |
+| anything else | **abort** | unclassified: stop and add a rule |
+
+An unclassified path aborts the run instead of guessing. `union` writes code with
+no conflict markers, so a blind default would silently produce invalid source in
+exactly the case nobody has thought about. Stopping is safe — nothing has been
+pushed at that point.
+
+Modify/delete conflicts are handled before any text merge: if the policy's
+preferred side deleted the file, the deletion is accepted; otherwise the
+surviving side is kept.
 
 The union policy uses `git merge-file --union`, so both hunks survive. Anything
 unmatched defaults to union rather than to a silent either/or.
