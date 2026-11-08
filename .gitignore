@@ -70,3 +70,6 @@ temp_agents/
 # conductor extension and planning directories
 conductor/
 .vscode-test/
+
+# Automated upstream-sync release state (run logs and scratch worktrees)
+.gemini/automation/
