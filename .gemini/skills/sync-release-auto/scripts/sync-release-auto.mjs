@@ -1305,7 +1305,17 @@ async function cmdRun(root, flags) {
     // ------------------------------------------------------------------
     step('Watch the release workflow');
     // ------------------------------------------------------------------
-    const slug = repoSlug(root);
+    // The push has already happened at this point, so a failure here must not
+    // read as "the release did not happen". A non-GitHub origin (a clone of a
+    // local path, as used for rehearsals) simply cannot be watched.
+    let slug;
+    try {
+      slug = repoSlug(root);
+    } catch {
+      warn(`origin is not a GitHub remote; the release branch is pushed but cannot be watched`);
+      summary.status = 'pushed-unwatched';
+      return summary;
+    }
     const workflowRun = await waitForRelease(slug, check.nextBranch, releaseSha, timeoutMinutes);
     if (!workflowRun) {
       warn(`no completed workflow run after ${timeoutMinutes}m; check the Actions tab`);
