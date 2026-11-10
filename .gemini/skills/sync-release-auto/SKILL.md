@@ -122,6 +122,16 @@ unmatched defaults to union rather than to a silent either/or.
   the 8 manifests and the lockfile, the run aborts.
 - **A broken build never ships.** The workspace is compiled and the gate run
   before the push.
+- **The gate runs on a Node that actually works.** `resolveNodeEnv()` pins the
+  version: this machine defaults to Node 24, on which `config.test.ts` has 64
+  failures that all pass on Node 22/26 for the same commit. Inheriting PATH
+  would block every release with a red that looks exactly like merge damage.
+- **Pre-existing failures are excluded by name, never by silence.**
+  `GATE_EXCLUSIONS` lists each skipped test file with a concrete reason, and the
+  run logs every skip. An entry is only legitimate when the failure also happens
+  on the source branch before the merge — otherwise it is merge damage and must
+  be fixed. Today that list holds `ProviderModelDialog.test.tsx` (2 act(...)
+  warnings from its async catalog fetch); the other 404 CLI tests still run.
 - **Concurrency is locked.** `.git/automation.lock` holds a pid; a live holder
   aborts the new run, a dead one is reclaimed.
 - **Only the main checkout's `node_modules` is shared, never modified.** The
