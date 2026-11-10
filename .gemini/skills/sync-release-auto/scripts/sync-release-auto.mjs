@@ -959,6 +959,9 @@ function resolveNodeEnv(root) {
   return env;
 }
 
+/** Environment (PATH included) used to build and test the merged tree. */
+let gateEnv = { ...process.env };
+
 function runTest(worktree, label, cmd, args) {
   log(`  → ${label}`);
   const started = Date.now();
