@@ -1501,15 +1501,31 @@ async function cmdRun(root, flags) {
     try {
       git(['fetch', 'origin', '--quiet'], { cwd: root });
       const upstreamTip = git(['rev-parse', `origin/${SOURCE_BRANCH}`], { cwd: root });
-      if (!isAncestor(root, `refs/heads/${SOURCE_BRANCH}`, upstreamTip)) {
-        throw new Error('the remote source branch is not a descendant of the local one');
+      const localTip = git(['rev-parse', `refs/heads/${SOURCE_BRANCH}`], { cwd: root });
+      // Only move the ref when HEAD is that branch; otherwise update-ref would
+      // advance the ref while the checked-out files stayed behind, leaving the
+      // main checkout dirty with misleading "deleted" changes.
+      const headRef = git(['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: root });
+      if (localTip !== upstreamTip && headRef === SOURCE_BRANCH) {
+        if (!isAncestor(root, 'HEAD', upstreamTip)) {
+          throw new Error('the remote source branch is not a descendant of HEAD');
+        }
+        git(['merge', '--ff-only', upstreamTip], { cwd: root });
+        ok(`fast-forwarded the checked-out ${SOURCE_BRANCH} to the synced merge`);
+      } else if (localTip !== upstreamTip) {
+        if (!isAncestor(root, `refs/heads/${SOURCE_BRANCH}`, upstreamTip)) {
+          throw new Error('the remote source branch is not a descendant of the local one');
+        }
+        // Not checked out here, so moving the ref cannot desync a worktree.
+        git(['update-ref', `refs/heads/${SOURCE_BRANCH}`, upstreamTip], { cwd: root });
+        ok(
+          `advanced ${SOURCE_BRANCH} to the synced merge (currently checked out: ${headRef})`,
+        );
       }
-      git(['update-ref', `refs/heads/${SOURCE_BRANCH}`, upstreamTip], { cwd: root });
-      ok(`fast-forwarded the local ${SOURCE_BRANCH} to the synced merge`);
-    } catch {
+    } catch (error) {
       warn(
-        `local ${SOURCE_BRANCH} could not fast-forward; the next run may re-merge. ` +
-          `Fix with: git update-ref refs/heads/${SOURCE_BRANCH} origin/${SOURCE_BRANCH}`,
+        `local ${SOURCE_BRANCH} could not fast-forward: ${messageOf(error)}. ` +
+          `Fix with: git checkout ${SOURCE_BRANCH} && git merge --ff-only origin/${SOURCE_BRANCH}`,
       );
     }
 
