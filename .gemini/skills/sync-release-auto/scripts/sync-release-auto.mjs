@@ -28,7 +28,7 @@
 //   * All mutating work happens in throwaway worktrees, so an interrupted run
 //     cannot leave the main checkout on a half-merged branch.
 
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import {
   existsSync,
   mkdirSync,
@@ -892,11 +892,78 @@ function cleanEnv() {
   return env;
 }
 
+/**
+ * Resolve an environment whose Node satisfies the repo's `.nvmrc`.
+ *
+ * The suites are Node-version sensitive in a way that looks like merge damage:
+ * `packages/cli/src/config/config.test.ts` has 64 failures on Node 24 and zero
+ * on Node 22 for the *same* commit. Running the gate on whatever Node happens
+ * to be first on PATH would therefore block every release with a false red.
+ */
+function resolveNodeEnv(root) {
+  const env = cleanEnv();
+  let wanted = null;
+  try {
+    wanted = readFileSync(join(root, '.nvmrc'), 'utf8').trim().replace(/^v/, '');
+  } catch {
+    // No .nvmrc: nothing to enforce.
+  }
+  if (!wanted) return env;
+
+  const wantedMajor = Number(wanted.split('.')[0]);
+  const current = process.versions.node;
+  if (Number(current.split('.')[0]) === wantedMajor) {
+    return env;
+  }
+
+  // Every other installed version, as `<bin dir>` + its major, newest last.
+  const installed = [];
+  const nvmDir = join(process.env.HOME ?? '', '.nvm', 'versions', 'node');
+  if (existsSync(nvmDir)) {
+    for (const entry of readdirSync(nvmDir)) {
+      const bin = join(nvmDir, entry, 'bin');
+      if (!existsSync(join(bin, 'node'))) continue;
+      installed.push({ bin, major: Number(entry.replace(/^v/, '').split('.')[0]), entry });
+    }
+  }
+  installed.sort((a, b) => a.entry.localeCompare(b.entry, undefined, { numeric: true }));
+
+  // An early minor of a major can be too old to run vitest at all (Node 20.3
+  // has no events.addAbortListener), so a candidate must prove it can load the
+  // module graph the tests need before it is used.
+  const usable = installed.filter(({ bin }) => {
+    const probe = spawnSync(
+      bin + '/node',
+      ['-e', "import('node:events').then((m)=>process.exit(m.addAbortListener?0:1))"],
+      { encoding: 'utf8' },
+    );
+    return probe.status === 0;
+  });
+
+  // Prefer the requested major; otherwise take the newest major that works --
+  // a false red from an unusable Node would block every release.
+  const sameMajor = usable.filter((c) => c.major === wantedMajor);
+  const chosen = sameMajor.at(-1) ?? usable.at(-1);
+  if (!chosen) {
+    warn(
+      `this shell runs Node ${current} but .nvmrc wants ${wantedMajor}, and no usable ` +
+        `install was found; the gate may report version-specific failures`,
+    );
+    return env;
+  }
+  env.PATH = `${chosen.bin}:${env.PATH}`;
+  ok(
+    `using Node ${chosen.entry} from ${chosen.bin} ` +
+      `(.nvmrc asks for ${wantedMajor}; this shell runs ${current})`,
+  );
+  return env;
+}
+
 function runTest(worktree, label, cmd, args) {
   log(`  → ${label}`);
   const started = Date.now();
   try {
-    run(cmd, args, { cwd: worktree, env: cleanEnv() });
+    run(cmd, args, { cwd: worktree, env: gateEnv });
   } catch (error) {
     const seconds = ((Date.now() - started) / 1000).toFixed(1);
     fail(`${label} failed after ${seconds}s`);
@@ -907,8 +974,9 @@ function runTest(worktree, label, cmd, args) {
   ok(`${label} (${((Date.now() - started) / 1000).toFixed(1)}s)`);
 }
 
-function testGate(worktree, { quick }) {
+function testGate(worktree, root, { quick }) {
   step('Test gate');
+  gateEnv = resolveNodeEnv(root);
   runTest(worktree, 'typecheck', 'npm', ['run', 'typecheck']);
   runTest(worktree, 'core openai + chat suites', 'npx', [
     'vitest',
@@ -1330,6 +1398,7 @@ async function cmdRun(root, flags) {
     step('Build the merged sources for the test gate');
     // ------------------------------------------------------------------
     prepareGeneratedFiles(root, releasePath);
+    gateEnv = resolveNodeEnv(root);
     // Only the packages the gate compiles are built. `vscode-ide-companion` is
     // deliberately excluded: it needs a package-local esbuild that a shared
     // install cannot provide, and no gate suite touches it.
@@ -1346,7 +1415,7 @@ async function cmdRun(root, flags) {
       try {
         run('npm', ['run', 'build', '--workspace', name], {
           cwd: releasePath,
-          env: cleanEnv(),
+          env: gateEnv,
         });
       } catch (error) {
         abort(
@@ -1357,7 +1426,7 @@ async function cmdRun(root, flags) {
     ok('the packages the gate needs are built');
 
     // ------------------------------------------------------------------
-    testGate(releasePath, { quick });
+    testGate(releasePath, root, { quick });
 
     // ------------------------------------------------------------------
     step(dryRun ? 'Dry run: stopping before push' : 'Push and release');
