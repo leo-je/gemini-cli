@@ -17,6 +17,8 @@ import type { IPty } from '@lydell/node-pty';
 import {
   getShellConfiguration,
   resolveExecutable,
+  GEMINI_CLI_IN_SHELL_ENV_VAR,
+  GEMINI_CLI_IN_SHELL_ENV_VAR_VALUE,
   type ShellType,
 } from '../utils/shell-utils.js';
 import { isBinary, truncateString } from '../utils/textUtils.js';
@@ -602,6 +604,7 @@ export class ShellExecutionService {
       ...sanitizedEnv,
       [GEMINI_CLI_IDENTIFICATION_ENV_VAR]:
         GEMINI_CLI_IDENTIFICATION_ENV_VAR_VALUE,
+      [GEMINI_CLI_IN_SHELL_ENV_VAR]: GEMINI_CLI_IN_SHELL_ENV_VAR_VALUE,
       TERM: 'xterm-256color',
       PAGER: shellExecutionConfig.pager ?? 'cat',
       GIT_PAGER: shellExecutionConfig.pager ?? 'cat',
@@ -2172,6 +2175,44 @@ export class ShellExecutionService {
       exitCode: info.exitCode,
       signal: info.signal,
     }));
+  }
+
+  /**
+   * Terminates all active child shell process groups and PTYs before process exit.
+   */
+  static async cleanupAllActiveProcesses(): Promise<void> {
+    const terminationPromises: Array<Promise<void>> = [];
+
+    for (const [pid, entry] of this.activeChildProcesses.entries()) {
+      const proc = entry.process;
+      if (proc?.pid) {
+        terminationPromises.push(
+          killProcessGroup({
+            pid: proc.pid,
+            escalate: true,
+            isExited: () =>
+              !this.activeChildProcesses.has(pid) ||
+              proc.exitCode !== null ||
+              proc.signalCode !== null,
+          }).catch(() => {}),
+        );
+      }
+    }
+
+    for (const [pid, entry] of this.activePtys.entries()) {
+      terminationPromises.push(
+        killProcessGroup({
+          pid,
+          escalate: true,
+          pty: entry.ptyProcess,
+          isExited: () => !this.isPtyActive(pid),
+        }).catch(() => {}),
+      );
+    }
+
+    await Promise.all(terminationPromises);
+    this.activeChildProcesses.clear();
+    this.activePtys.clear();
   }
 
   /**

@@ -2530,6 +2530,54 @@ describe('ShellExecutionService execution method selection', () => {
     expect(mockCpSpawn).toHaveBeenCalled();
     expect(result.executionMethod).toBe('child_process');
   });
+
+  it('cleanupAllActiveProcesses should terminate active child processes and PTYs', async () => {
+    mockPlatform.mockReturnValue('linux');
+    Object.assign(mockChildProcess, {
+      killed: false,
+      exitCode: null,
+      signalCode: null,
+    });
+    mockProcessKill.mockImplementation(
+      (pid: number, signal?: string | number) => {
+        if (signal === 0) {
+          throw Object.assign(new Error('ESRCH'), { code: 'ESRCH' });
+        }
+        if (pid === -54321 && signal === 'SIGTERM') {
+          Object.assign(mockChildProcess, { signalCode: 'SIGTERM' });
+        }
+        return true;
+      },
+    );
+
+    const abortController1 = new AbortController();
+    void ShellExecutionService.execute(
+      'sleep 10',
+      '/test/dir',
+      onOutputEventMock,
+      abortController1.signal,
+      false,
+      shellExecutionConfig,
+    );
+
+    const abortController2 = new AbortController();
+    void ShellExecutionService.execute(
+      'sleep 20',
+      '/test/dir',
+      onOutputEventMock,
+      abortController2.signal,
+      true,
+      shellExecutionConfig,
+    );
+
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    await ShellExecutionService.cleanupAllActiveProcesses();
+
+    expect(mockProcessKill).toHaveBeenCalledWith(-54321, 'SIGTERM');
+    expect(mockProcessKill).not.toHaveBeenCalledWith(-54321, 'SIGKILL');
+    expect(mockPtyProcess.kill).toHaveBeenCalledWith('SIGTERM');
+  });
 });
 
 describe('ShellExecutionService environment variables', () => {
@@ -3186,5 +3234,29 @@ describe('Windows ConPTY exit desynchronization and hang regression (#25166)', (
 
     expect(outcome).not.toBe('timeout');
     expect((outcome as { exitCode: number }).exitCode).toBe(0);
+  });
+
+  it('should inject GEMINI_CLI_IN_SHELL=1 into the child process environment', async () => {
+    const abortController = new AbortController();
+    const handle = await ShellExecutionService.execute(
+      'echo $GEMINI_CLI_IN_SHELL',
+      '/test/dir',
+      onOutputEventMock,
+      abortController.signal,
+      true,
+      shellExecutionConfig,
+    );
+    mockPtyProcess.onExit.mock.calls[0][0]({ exitCode: 0, signal: null });
+    await handle.result;
+
+    expect(mockPtySpawn).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.any(Array),
+      expect.objectContaining({
+        env: expect.objectContaining({
+          GEMINI_CLI_IN_SHELL: '1',
+        }),
+      }),
+    );
   });
 });
