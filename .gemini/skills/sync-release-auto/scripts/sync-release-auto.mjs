@@ -1147,6 +1147,9 @@ async function cmdCheck(root, flags) {
     npmLatest: state.latest,
     nextVersion: decided.version,
     nextBranch: decided.branch,
+    // The verify step builds its release URL from this; omitting it made the
+    // check request /releases/tags/undefined and report a false 404.
+    nextTag: decided.tag,
     basedOn: decided.basedOn,
     checkedAt: new Date().toISOString(),
   };
@@ -1581,16 +1584,16 @@ async function cmdRun(root, flags) {
     }
 
     try {
-      const release = await getJson(`${API}/repos/${slug}/releases/tags/${check.tag}`, {
+      const release = await getJson(`${API}/repos/${slug}/releases/tags/${check.nextTag}`, {
         token: githubAuth().token,
       });
       const assets = release.assets ?? [];
-      ok(`release ${check.tag}: ${assets.length} asset(s)`);
+      ok(`release ${check.nextTag}: ${assets.length} asset(s)`);
       for (const asset of assets) {
         log(`    - ${asset.name} ${(asset.size / 1048576).toFixed(1)} MB`);
       }
     } catch (error) {
-      warn(`no GitHub release ${check.tag} yet: ${error instanceof Error ? error.message : error}`);
+      warn(`no GitHub release ${check.nextTag} yet: ${error instanceof Error ? error.message : error}`);
     }
 
     summary.status = published ? 'released' : 'built-not-published';
