@@ -432,7 +432,7 @@ describe('ScrollProvider', () => {
       callback({
         name: 'left-press',
         col: 10,
-        row: 0,
+        row: 1, // the thumb: mouse rows are 1-based, the box starts at row 1
         shift: false,
         ctrl: false,
         meta: false,
@@ -493,7 +493,7 @@ describe('ScrollProvider', () => {
       callback({
         name: 'left-press',
         col: 10,
-        row: 0,
+        row: 1, // the thumb: mouse rows are 1-based, the box starts at row 1
         shift: false,
         ctrl: false,
         meta: false,

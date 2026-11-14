@@ -5,7 +5,15 @@
  */
 
 import {
+  DEFAULT_GEMINI_MODEL_AUTO,
+  DEFAULT_MODEL_CONFIGS,
+  GEMINI_MODEL_ALIAS_AUTO,
+  GEMINI_MODEL_ALIAS_FLASH,
+  GEMINI_MODEL_ALIAS_FLASH_LITE,
+  GEMINI_MODEL_ALIAS_PRO,
   ModelSlashCommandEvent,
+  PREVIEW_GEMINI_MODEL_AUTO,
+  VALID_GEMINI_MODELS,
   logModelSlashCommand,
 } from '@google/gemini-cli-core';
 import {
@@ -16,6 +24,43 @@ import {
 import { MessageType } from '../types.js';
 import { isOpenAiBackend } from '../openai/index.js';
 
+function getValidModelNames(context: CommandContext): Set<string> {
+  const validModels = new Set<string>([
+    ...Array.from(VALID_GEMINI_MODELS).filter((model) => model !== 'none'),
+    ...Object.keys(DEFAULT_MODEL_CONFIGS.modelDefinitions ?? {}),
+    GEMINI_MODEL_ALIAS_AUTO,
+    GEMINI_MODEL_ALIAS_PRO,
+    GEMINI_MODEL_ALIAS_FLASH,
+    GEMINI_MODEL_ALIAS_FLASH_LITE,
+    PREVIEW_GEMINI_MODEL_AUTO,
+    DEFAULT_GEMINI_MODEL_AUTO,
+  ]);
+
+  const config = context.services.agentContext?.config;
+  const serviceDefinitions = config
+    ?.getModelConfigService?.()
+    ?.getModelDefinitions?.();
+  if (serviceDefinitions) {
+    for (const model of Object.keys(serviceDefinitions)) {
+      validModels.add(model);
+    }
+  }
+
+  const modelConfigs = context.services.settings?.merged?.modelConfigs;
+  if (modelConfigs?.customAliases) {
+    for (const alias of Object.keys(modelConfigs.customAliases)) {
+      validModels.add(alias);
+    }
+  }
+  if (modelConfigs?.modelDefinitions) {
+    for (const model of Object.keys(modelConfigs.modelDefinitions)) {
+      validModels.add(model);
+    }
+  }
+
+  return validModels;
+}
+
 const setModelCommand: SlashCommand = {
   name: 'set',
   description:
@@ -24,7 +69,10 @@ const setModelCommand: SlashCommand = {
   autoExecute: false,
   action: async (context: CommandContext, args: string) => {
     const parts = args.trim().split(/\s+/).filter(Boolean);
-    if (parts.length === 0) {
+    const persist = parts.includes('--persist');
+    const nonFlagParts = parts.filter((part) => part !== '--persist');
+
+    if (nonFlagParts.length === 0) {
       context.ui.addItem({
         type: MessageType.ERROR,
         text: 'Usage: /model set <model-name> [--persist]',
@@ -32,8 +80,24 @@ const setModelCommand: SlashCommand = {
       return;
     }
 
-    const modelName = parts[0];
-    const persist = parts.includes('--persist');
+    const modelName = nonFlagParts[0];
+    // The allowlist is Gemini-shaped: built-in Gemini models, the configured
+    // aliases and the settings-declared definitions. An OpenAI-compatible
+    // endpoint serves models this CLI cannot enumerate, so validating against
+    // it would reject every endpoint-served name (`gpt-4o`, for instance) that
+    // `/model list` and `/provider` are meant to install. Keep the validation
+    // on the Gemini paths, which is where upstream added it.
+    const config = context.services.agentContext?.config;
+    if (
+      !isOpenAiBackend(config) &&
+      !getValidModelNames(context).has(modelName)
+    ) {
+      context.ui.addItem({
+        type: MessageType.ERROR,
+        text: `Invalid model "${modelName}". Run /model to view and select from available models.`,
+      });
+      return;
+    }
 
     if (context.services.agentContext?.config) {
       context.services.agentContext.config.setModel(modelName, !persist);
@@ -45,6 +109,17 @@ const setModelCommand: SlashCommand = {
         text: `Model set to ${modelName}${persist ? ' (persisted)' : ''}`,
       });
     }
+  },
+  completion: async (context: CommandContext, partialArg: string) => {
+    // Same reason as the action: the Gemini allowlist cannot name what an
+    // OpenAI-compatible endpoint serves, so offering it there would complete to
+    // names the endpoint does not have. `/model list` owns that flow.
+    const config = context.services.agentContext?.config;
+    if (isOpenAiBackend(config)) {
+      return [];
+    }
+    const validModels = Array.from(getValidModelNames(context));
+    return validModels.filter((model) => model.startsWith(partialArg));
   },
 };
 
@@ -115,6 +190,10 @@ export const modelCommand: SlashCommand = {
   kind: CommandKind.BUILT_IN,
   autoExecute: false,
   subCommands: [manageModelCommand, listModelsCommand, setModelCommand],
-  action: async (context: CommandContext, args: string) =>
-    manageModelCommand.action!(context, args),
+  action: async (context: CommandContext, args: string) => {
+    if (args.trim().length > 0) {
+      return setModelCommand.action?.(context, args);
+    }
+    return manageModelCommand.action?.(context, args);
+  },
 };

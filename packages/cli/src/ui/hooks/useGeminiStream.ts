@@ -51,6 +51,7 @@ import {
   RECITATION_BLOCKED_MESSAGE,
   OTHER_BLOCKED_MESSAGE,
   TRUE_EMPTY_RESPONSE_MESSAGE,
+  LlmRole,
 } from '@google/gemini-cli-core';
 import type {
   CompletedToolCall,
@@ -252,6 +253,7 @@ export const useGeminiStream = (
   terminalHeight: number,
   isShellFocused?: boolean,
   consumeUserHint?: () => string | null,
+  isEditorDialogOpen?: boolean,
 ) => {
   const [initError, setInitError] = useState<string | null>(null);
   const [retryStatus, setRetryStatus] = useState<RetryAttemptPayload | null>(
@@ -270,6 +272,8 @@ export const useGeminiStream = (
   );
   const cancelPromiseRef = useRef<Promise<void>>(Promise.resolve());
   const activeQueryIdRef = useRef<string | null>(null);
+  const lastQueryRef = useRef<PartListUnion | null>(null);
+  const lastPromptIdRef = useRef<string | null>(null);
   const previousApprovalModeRef = useRef<ApprovalMode>(
     config.getApprovalMode(),
   );
@@ -297,7 +301,13 @@ export const useGeminiStream = (
 
   useEffect(() => {
     const handleRetryAttempt = (payload: RetryAttemptPayload) => {
-      if (turnCancelledRef.current || !isRespondingRef.current) {
+      if (
+        turnCancelledRef.current ||
+        !isRespondingRef.current ||
+        payload.role !== LlmRole.MAIN ||
+        !lastPromptIdRef.current ||
+        payload.promptId !== lastPromptIdRef.current
+      ) {
         return;
       }
       setRetryStatus(payload);
@@ -713,8 +723,6 @@ export const useGeminiStream = (
     settings.merged.ui?.compactToolOutput,
   ]);
 
-  const lastQueryRef = useRef<PartListUnion | null>(null);
-  const lastPromptIdRef = useRef<string | null>(null);
   const loopDetectedRef = useRef(false);
   const autoNudgeAttemptCountRef = useRef<number>(0);
   const MAX_AUTO_NUDGE_ATTEMPTS = 2;
@@ -1074,7 +1082,7 @@ export const useGeminiStream = (
 
   useKeypress(
     (key) => {
-      if (key.name === 'escape' && !isShellFocused) {
+      if (key.name === 'escape' && !isShellFocused && !isEditorDialogOpen) {
         void cancelOngoingRequest(false);
         return true;
       }
@@ -1082,8 +1090,9 @@ export const useGeminiStream = (
     },
     {
       isActive:
-        streamingState === StreamingState.Responding ||
-        streamingState === StreamingState.WaitingForConfirmation,
+        !isEditorDialogOpen &&
+        (streamingState === StreamingState.Responding ||
+          streamingState === StreamingState.WaitingForConfirmation),
     },
   );
 
@@ -1161,7 +1170,8 @@ export const useGeminiStream = (
           }
         }
 
-        if (shellModeActive && handleShellCommand(trimmedQuery, abortSignal)) {
+        if (shellModeActive) {
+          handleShellCommand(trimmedQuery, abortSignal);
           return { queryToSend: null, shouldProceed: false };
         }
 
@@ -1289,6 +1299,7 @@ export const useGeminiStream = (
 
   const handleThoughtEvent = useCallback(
     (eventValue: ThoughtSummary, _userMessageTimestamp: number) => {
+      setRetryStatus(null);
       setThought(eventValue);
 
       if (getInlineThinkingMode(settings) === 'full') {
@@ -1693,6 +1704,7 @@ export const useGeminiStream = (
             );
             break;
           case ServerGeminiEventType.ToolCallRequest:
+            setRetryStatus(null);
             toolCallRequests.push(event.value);
             pendingToolCallRequestsRef.current.push(event.value);
             break;
@@ -1922,12 +1934,13 @@ export const useGeminiStream = (
               setThought(null); // Reset thought when starting a new prompt
             }
 
-            setIsResponding(true);
-            setInitError(null);
-
             // Store query and prompt_id for potential retry on loop detection
             lastQueryRef.current = queryToSend;
             lastPromptIdRef.current = prompt_id!;
+
+            setRetryStatus(null);
+            setIsResponding(true);
+            setInitError(null);
 
             try {
               const stream = geminiClient.sendMessageStream(

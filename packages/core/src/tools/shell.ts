@@ -43,11 +43,14 @@ import {
   detectCommandSubstitution,
   normalizeCommand,
   escapeShellArg,
+  isInteractiveGeminiCommand,
+  INTERACTIVE_GEMINI_SHELL_ERROR,
 } from '../utils/shell-utils.js';
 import { SHELL_TOOL_NAME } from './tool-names.js';
 import { PARAM_ADDITIONAL_PERMISSIONS } from './definitions/base-declarations.js';
-import { ApprovalMode } from '../policy/types.js';
+import { ApprovalMode, PolicyDecision } from '../policy/types.js';
 import type { MessageBus } from '../confirmation-bus/message-bus.js';
+import { getToolCallContext } from '../utils/toolCallContext.js';
 import {
   acknowledgeAllSecurityWarnings,
   acknowledgeUntrustedFlags,
@@ -139,6 +142,7 @@ export class ShellToolInvocation extends BaseToolInvocation<
   ToolResult
 > {
   private proactivePermissionsConfirmed?: SandboxPermissions;
+  private confirmedCommand?: string;
 
   constructor(
     private readonly context: AgentLoopContext,
@@ -377,11 +381,26 @@ export class ShellToolInvocation extends BaseToolInvocation<
       }
       const rootCommands = [...new Set(getCommandRoots(command))];
       const allowRedirection = hasRedirection(command) ? true : undefined;
+      const allowCommandSubstitution = detectCommandSubstitution(command)
+        ? true
+        : undefined;
 
       if (rootCommands.length > 0) {
-        return { commandPrefix: rootCommands, allowRedirection };
+        return {
+          commandPrefix: rootCommands,
+          allowRedirection,
+          ...(allowCommandSubstitution !== undefined
+            ? { allowCommandSubstitution }
+            : {}),
+        };
       }
-      return { commandPrefix: this.params.command, allowRedirection };
+      return {
+        commandPrefix: this.params.command,
+        allowRedirection,
+        ...(allowCommandSubstitution !== undefined
+          ? { allowCommandSubstitution }
+          : {}),
+      };
     }
     return undefined;
   }
@@ -390,6 +409,10 @@ export class ShellToolInvocation extends BaseToolInvocation<
     abortSignal: AbortSignal,
     forcedDecision?: ForcedToolDecision,
   ): Promise<ToolCallConfirmationDetails | false> {
+    if (isInteractiveGeminiCommand(stripShellWrapper(this.params.command))) {
+      return false;
+    }
+
     if (forcedDecision === 'deny') {
       return super.shouldConfirmExecute(abortSignal, forcedDecision);
     }
@@ -570,6 +593,12 @@ export class ShellToolInvocation extends BaseToolInvocation<
         rootCommand: rootCommandDisplay,
         additionalPermissions: effectiveAdditionalPermissions,
         onConfirm: async (outcome: ToolConfirmationOutcome) => {
+          if (
+            outcome !== ToolConfirmationOutcome.Cancel &&
+            outcome !== ToolConfirmationOutcome.ModifyWithEditor
+          ) {
+            this.confirmedCommand = this.params.command;
+          }
           if (outcome === ToolConfirmationOutcome.ProceedAlwaysAndSave) {
             this.context.config.sandboxPolicyManager.addPersistentApproval(
               rootCommand,
@@ -604,6 +633,7 @@ export class ShellToolInvocation extends BaseToolInvocation<
         ) {
           return;
         }
+        this.confirmedCommand = this.params.command;
         // Remember approved flags and the reviewed build file state for the
         // rest of the session so identical follow-up commands do not prompt.
         acknowledgeUntrustedFlags(
@@ -629,6 +659,39 @@ export class ShellToolInvocation extends BaseToolInvocation<
     return confirmationDetails;
   }
 
+  private async isCommandSubstitutionAllowed(
+    options: ExecuteOptions,
+  ): Promise<boolean> {
+    if (
+      (options.isClientInitiated ?? false) ||
+      (options.isUserConfirmed ?? false) ||
+      this.confirmedCommand === this.params.command
+    ) {
+      return true;
+    }
+
+    if (this.hasTaintedOrBuildFileRisk()) {
+      return false;
+    }
+
+    const policyEngine = this.context.config?.getPolicyEngine?.();
+    if (policyEngine) {
+      const checkResult = await policyEngine.check(
+        {
+          name: this._toolName ?? SHELL_TOOL_NAME,
+          // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion
+          args: this.params as unknown as Record<string, unknown>,
+        },
+        this._serverName,
+        this._toolAnnotations,
+        getToolCallContext()?.subagent,
+      );
+      return checkResult.decision === PolicyDecision.ALLOW;
+    }
+
+    return this.context.config?.getApprovalMode?.() === ApprovalMode.YOLO;
+  }
+
   async execute(options: ExecuteOptions): Promise<ToolResult> {
     const {
       abortSignal: signal,
@@ -638,7 +701,21 @@ export class ShellToolInvocation extends BaseToolInvocation<
     } = options;
     const strippedCommand = stripShellWrapper(this.params.command);
 
-    if (detectCommandSubstitution(strippedCommand)) {
+    if (isInteractiveGeminiCommand(strippedCommand)) {
+      return {
+        llmContent: INTERACTIVE_GEMINI_SHELL_ERROR,
+        returnDisplay: INTERACTIVE_GEMINI_SHELL_ERROR,
+        error: {
+          message: INTERACTIVE_GEMINI_SHELL_ERROR,
+          type: ToolErrorType.SHELL_EXECUTE_ERROR,
+        },
+      };
+    }
+
+    if (
+      detectCommandSubstitution(strippedCommand) &&
+      !(await this.isCommandSubstitutionAllowed(options))
+    ) {
       return {
         llmContent:
           'Command injection detected: command substitution syntax ' +

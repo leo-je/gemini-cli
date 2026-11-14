@@ -58,18 +58,36 @@ export function getMouseEventName(
     } else {
       return 'scroll-down';
     }
+  } else if (isRelease) {
+    // A release ends a gesture, whatever bits the terminal set on it. Some
+    // terminals report the release of a dragged button with the motion bit
+    // still set (`<35;…m`), and the legacy encoding reports it as "no button"
+    // (`<3;…m`). Both used to decode as `move` or `null`, so the matching
+    // `*-release` never arrived and consumers kept the button held down.
+    const button = buttonCode & 3;
+    switch (button) {
+      case 1:
+        return 'middle-release';
+      case 2:
+        return 'right-release';
+      case 0:
+      case 3:
+      default:
+        // 3 is the legacy "no button" code; the left button is the only drag
+        // these events can end.
+        return 'left-release';
+    }
   } else if (isMove) {
     return 'move';
   } else {
     const button = buttonCode & 3;
-    const type = isRelease ? 'release' : 'press';
     switch (button) {
       case 0:
-        return `left-${type}`;
+        return 'left-press';
       case 1:
-        return `middle-${type}`;
+        return 'middle-press';
       case 2:
-        return `right-${type}`;
+        return 'right-press';
       default:
         return null;
     }
@@ -109,6 +127,11 @@ export function parseSGRMouseEvent(
     const name = getMouseEventName(buttonCode, isRelease);
 
     if (name) {
+      let button = getButtonFromCode(buttonCode);
+      if (name === 'left-release' && button === 'none') {
+        // Release reported with the legacy "no button" code.
+        button = 'left';
+      }
       return {
         event: {
           name,
@@ -117,7 +140,7 @@ export function parseSGRMouseEvent(
           shift,
           col,
           row,
-          button: getButtonFromCode(buttonCode),
+          button,
         },
         length: match[0].length,
       };

@@ -1582,6 +1582,7 @@ Logging in with Google... Restarting Gemini CLI to continue.
         addItem: historyManager.addItem,
         onCancelSubmit,
         isShellFocused: embeddedShellFocused,
+        isEditorDialogOpen,
         logger,
       })
     : // eslint-disable-next-line react-hooks/rules-of-hooks
@@ -1605,6 +1606,7 @@ Logging in with Google... Restarting Gemini CLI to continue.
         terminalHeight,
         embeddedShellFocused,
         consumePendingHints,
+        isEditorDialogOpen,
       );
 
   const {
@@ -1710,6 +1712,7 @@ Logging in with Google... Restarting Gemini CLI to continue.
     submitQuery,
     isMcpReady,
     isCompressing,
+    shellModeActive,
   });
 
   cancelHandlerRef.current = useCallback(
@@ -1739,6 +1742,9 @@ Logging in with Google... Restarting Gemini CLI to continue.
       }
 
       if (textToSet) {
+        if (shellModeActive) {
+          setShellModeActive(false);
+        }
         buffer.setText(textToSet);
       }
     },
@@ -1748,6 +1754,8 @@ Logging in with Google... Restarting Gemini CLI to continue.
       getQueuedMessagesText,
       clearQueue,
       pendingHistoryItems,
+      shellModeActive,
+      setShellModeActive,
     ],
   );
 

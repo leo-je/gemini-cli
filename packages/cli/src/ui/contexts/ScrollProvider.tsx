@@ -59,6 +59,95 @@ const getClampedScrollTop = (
   return Math.max(0, Math.min(scrollTop, maxScroll));
 };
 
+/** ink never draws a vertical scrollbar thumb shorter than a single row. */
+const MIN_THUMB_HALVES = 2;
+
+/**
+ * Where the scrollbar thumb is drawn, and the scroll range it maps to.
+ *
+ * This mirrors `calculateScrollbarThumb()` in ink (`measure-element.js`), which
+ * is what actually paints the thumb: it works in half rows and never draws a
+ * thumb shorter than one row. Re-deriving the geometry with a different formula
+ * makes a press land outside the thumb the user can see, which turns a "grab"
+ * into a "jump to this position" click.
+ */
+export const getScrollbarGeometry = (
+  scrollTop: number,
+  scrollHeight: number,
+  innerHeight: number,
+  trackHeight: number,
+):
+  | {
+      /** First row of the thumb, counted from the top of the track. */
+      thumbStart: number;
+      /** Height of the thumb in rows, at least 1. */
+      thumbHeight: number;
+      /** Largest value of `thumbStart`. */
+      maxThumbStart: number;
+      /** Largest scroll position a thumb row can map to. */
+      maxScrollTop: number;
+    }
+  | undefined => {
+  if (
+    !Number.isFinite(scrollTop) ||
+    !Number.isFinite(scrollHeight) ||
+    !Number.isFinite(innerHeight) ||
+    !Number.isFinite(trackHeight) ||
+    innerHeight <= 0 ||
+    trackHeight <= 0 ||
+    scrollHeight <= innerHeight
+  ) {
+    return undefined;
+  }
+
+  const maxScrollTop = scrollHeight - innerHeight;
+  const trackHalves = trackHeight * 2;
+  const thumbHalves = Math.max(
+    MIN_THUMB_HALVES,
+    Math.round((innerHeight / scrollHeight) * trackHalves),
+  );
+  const maxThumbHalves = trackHalves - thumbHalves;
+  const clampedScrollTop = Math.max(0, Math.min(scrollTop, maxScrollTop));
+  const thumbStartHalves =
+    maxThumbHalves > 0
+      ? Math.round((clampedScrollTop / maxScrollTop) * maxThumbHalves)
+      : 0;
+  const thumbStart = Math.floor(thumbStartHalves / 2);
+  const thumbEnd = Math.min(
+    trackHeight,
+    Math.ceil((thumbStartHalves + thumbHalves) / 2),
+  );
+  const thumbHeight = Math.max(1, thumbEnd - thumbStart);
+
+  return {
+    thumbStart,
+    thumbHeight,
+    maxThumbStart: Math.max(0, trackHeight - thumbHeight),
+    maxScrollTop,
+  };
+};
+
+/**
+ * Returns the scroll position that puts the top of the thumb at `thumbStart`,
+ * clamped to the scroll range.
+ */
+const scrollTopForThumbStart = (
+  thumbStart: number,
+  geometry: { maxThumbStart: number; maxScrollTop: number },
+): number => {
+  if (geometry.maxThumbStart <= 0) {
+    return 0;
+  }
+  const clampedThumbStart = Math.max(
+    0,
+    Math.min(geometry.maxThumbStart, thumbStart),
+  );
+  const scrollTop = Math.round(
+    (clampedThumbStart / geometry.maxThumbStart) * geometry.maxScrollTop,
+  );
+  return Number.isFinite(scrollTop) ? scrollTop : 0;
+};
+
 const findScrollableCandidates = (
   mouseEvent: MouseEvent,
   scrollables: Map<string, ScrollableEntry>,
@@ -255,8 +344,26 @@ export const ScrollProvider: React.FC<{ children: React.ReactNode }> = ({
     return false;
   };
 
+  const cancelDrag = () => {
+    if (dragStateRef.current.active) {
+      dragStateRef.current = {
+        active: false,
+        id: null,
+        offset: 0,
+      };
+      return true;
+    }
+    dragStateRef.current = { active: false, id: null, offset: 0 };
+    return false;
+  };
+
   const handleLeftPress = (mouseEvent: MouseEvent) => {
-    // Check for scrollbar interaction first
+    // A press always starts a new gesture. Without this, a drag whose release
+    // never arrived (a terminal may report it as `move`, or drop it when the
+    // pointer left the window) would keep steering the scrollbar, so the next
+    // unrelated drag would move the list.
+    cancelDrag();
+
     for (const entry of scrollablesRef.current.values()) {
       if (!entry.ref.current || !entry.hasFocus()) {
         continue;
@@ -267,77 +374,58 @@ export const ScrollProvider: React.FC<{ children: React.ReactNode }> = ({
 
       const { x, y, width, height } = boundingBox;
 
-      // Check if click is on the scrollbar column (x + width)
-      // The findScrollableCandidates logic implies scrollbar is at x + width.
-      if (
-        mouseEvent.col === x + width &&
-        mouseEvent.row >= y &&
-        mouseEvent.row < y + height
-      ) {
-        const { scrollTop, scrollHeight, innerHeight } = entry.getScrollState();
-
-        if (scrollHeight <= innerHeight) continue;
-
-        const thumbHeight = Math.max(
-          1,
-          Math.floor((innerHeight / scrollHeight) * innerHeight),
-        );
-        const maxScrollTop = scrollHeight - innerHeight;
-        const maxThumbY = innerHeight - thumbHeight;
-
-        if (maxThumbY <= 0) continue;
-
-        const currentThumbY = Math.round(
-          (scrollTop / maxScrollTop) * maxThumbY,
-        );
-
-        const absoluteThumbTop = y + currentThumbY;
-        const absoluteThumbBottom = absoluteThumbTop + thumbHeight;
-
-        const isTop = mouseEvent.row === y;
-        const isBottom = mouseEvent.row === y + height - 1;
-
-        const hitTop = isTop ? absoluteThumbTop : absoluteThumbTop - 1;
-        const hitBottom = isBottom
-          ? absoluteThumbBottom
-          : absoluteThumbBottom + 1;
-
-        const isThumbClick =
-          mouseEvent.row >= hitTop && mouseEvent.row < hitBottom;
-
-        let offset = 0;
-        const relativeMouseY = mouseEvent.row - y;
-
-        if (isThumbClick) {
-          offset = relativeMouseY - currentThumbY;
-        } else {
-          // Track click - Jump to position
-          // Center the thumb on the mouse click
-          const targetThumbY = Math.max(
-            0,
-            Math.min(maxThumbY, relativeMouseY - Math.floor(thumbHeight / 2)),
-          );
-
-          const newScrollTop = Math.round(
-            (targetThumbY / maxThumbY) * maxScrollTop,
-          );
-          if (entry.scrollTo) {
-            entry.scrollTo(newScrollTop);
-          } else {
-            entry.scrollBy(newScrollTop - scrollTop);
-          }
-
-          offset = relativeMouseY - targetThumbY;
-        }
-
-        // Start drag (for both thumb and track clicks)
-        dragStateRef.current = {
-          active: true,
-          id: entry.id,
-          offset,
-        };
-        return true;
+      // Mouse columns and rows are 1-based, box coordinates are 0-based, so
+      // the scrollbar painted on the last column of the box is at column
+      // `x + width` and the pointer's row inside the box is `row - 1 - y`.
+      const rowInBox = mouseEvent.row - 1 - y;
+      if (mouseEvent.col !== x + width || rowInBox < 0 || rowInBox >= height) {
+        continue;
       }
+
+      const { scrollTop, scrollHeight, innerHeight } = entry.getScrollState();
+      const geometry = getScrollbarGeometry(
+        scrollTop,
+        scrollHeight,
+        innerHeight,
+        height,
+      );
+      if (!geometry) continue;
+
+      const isThumbClick =
+        rowInBox >= geometry.thumbStart &&
+        rowInBox < geometry.thumbStart + geometry.thumbHeight;
+
+      let grabOffset = rowInBox - geometry.thumbStart;
+
+      if (!isThumbClick) {
+        // Track click: jump so the thumb is centred on the pointer, then keep
+        // dragging. The grab offset is measured against the thumb's new
+        // position so the first move does not repeat the jump.
+        const targetThumbStart = Math.max(
+          0,
+          Math.min(
+            geometry.maxThumbStart,
+            rowInBox - Math.floor(geometry.thumbHeight / 2),
+          ),
+        );
+        const newScrollTop = scrollTopForThumbStart(targetThumbStart, geometry);
+        if (entry.scrollTo) {
+          entry.scrollTo(newScrollTop);
+        } else {
+          entry.scrollBy(newScrollTop - scrollTop);
+        }
+        grabOffset = rowInBox - targetThumbStart;
+      }
+
+      // Start drag (for both thumb and track clicks). `offset` is the distance
+      // in rows from the pointer to the top of the thumb, which stays valid for
+      // the whole drag.
+      dragStateRef.current = {
+        active: true,
+        id: entry.id,
+        offset: grabOffset,
+      };
+      return true;
     }
 
     const candidates = findScrollableCandidates(
@@ -361,6 +449,14 @@ export const ScrollProvider: React.FC<{ children: React.ReactNode }> = ({
     const state = dragStateRef.current;
     if (!state.active || !state.id) return false;
 
+    // Only the left button drags the scrollbar. Terminals report the moves of a
+    // held left button with button `left`; anything else means the drag is over
+    // and its release went missing.
+    if (mouseEvent.button !== 'left') {
+      cancelDrag();
+      return false;
+    }
+
     const entry = scrollablesRef.current.get(state.id);
     if (!entry || !entry.ref.current) {
       state.active = false;
@@ -370,55 +466,42 @@ export const ScrollProvider: React.FC<{ children: React.ReactNode }> = ({
     const boundingBox = getBoundingBox(entry.ref.current);
     if (!boundingBox) return false;
 
-    const { y } = boundingBox;
+    const { y, height } = boundingBox;
     const { scrollTop, scrollHeight, innerHeight } = entry.getScrollState();
-
-    const thumbHeight = Math.max(
-      1,
-      Math.floor((innerHeight / scrollHeight) * innerHeight),
+    const geometry = getScrollbarGeometry(
+      scrollTop,
+      scrollHeight,
+      innerHeight,
+      height,
     );
-    const maxScrollTop = scrollHeight - innerHeight;
-    const maxThumbY = innerHeight - thumbHeight;
+    if (!geometry) return false;
 
-    if (maxThumbY <= 0) return false;
-
-    const relativeMouseY = mouseEvent.row - y;
-    // Calculate the target thumb position based on the mouse position and the offset.
-    // We clamp it to the valid range [0, maxThumbY].
-    const targetThumbY = Math.max(
-      0,
-      Math.min(maxThumbY, relativeMouseY - state.offset),
-    );
-
-    const targetScrollTop = Math.round(
-      (targetThumbY / maxThumbY) * maxScrollTop,
+    // Keep the pointer inside the track instead of letting a row outside it
+    // produce a scroll position outside the list.
+    const rowInBox = Math.max(0, Math.min(height - 1, mouseEvent.row - 1 - y));
+    const targetScrollTop = scrollTopForThumbStart(
+      rowInBox - state.offset,
+      geometry,
     );
 
     if (entry.scrollTo) {
       entry.scrollTo(targetScrollTop, 0);
-    } else {
+    } else if (targetScrollTop !== scrollTop) {
       entry.scrollBy(targetScrollTop - scrollTop);
     }
     return true;
   };
 
-  const handleLeftRelease = () => {
-    if (dragStateRef.current.active) {
-      dragStateRef.current = {
-        active: false,
-        id: null,
-        offset: 0,
-      };
-      return true;
-    }
-    return false;
-  };
+  const handleLeftRelease = () => cancelDrag();
 
   useMouse(
     (event: MouseEvent) => {
       if (event.name === 'scroll-up') {
+        // A wheel event means the gesture is no longer a scrollbar drag.
+        cancelDrag();
         return handleScroll('up', event);
       } else if (event.name === 'scroll-down') {
+        cancelDrag();
         return handleScroll('down', event);
       } else if (event.name === 'left-press') {
         return handleLeftPress(event);
@@ -426,6 +509,15 @@ export const ScrollProvider: React.FC<{ children: React.ReactNode }> = ({
         return handleMove(event);
       } else if (event.name === 'left-release') {
         return handleLeftRelease();
+      } else if (
+        event.name === 'right-press' ||
+        event.name === 'right-release' ||
+        event.name === 'middle-press' ||
+        event.name === 'middle-release' ||
+        event.name === 'double-click'
+      ) {
+        // Any other button cancels a drag whose release went missing.
+        cancelDrag();
       }
       return false;
     },

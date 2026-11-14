@@ -76,6 +76,7 @@ const STATIC_HISTORY_ITEM_TYPES: ReadonlySet<HistoryItem['type']> = new Set([
   'stats',
   'model_stats',
   'tool_stats',
+  'heatmap_stats',
   'model',
   'quit',
   'extensions_list',
