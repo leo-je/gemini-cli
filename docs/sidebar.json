@@ -230,6 +230,10 @@
           { "label": "Local development", "slug": "docs/local-development" },
           { "label": "NPM package structure", "slug": "docs/npm" },
           {
+            "label": "OpenAI provider env shadowing",
+            "slug": "docs/openai-provider-env-shadowing"
+          },
+          {
             "label": "Single-file bundle",
             "slug": "docs/single-file-bundle"
           }
