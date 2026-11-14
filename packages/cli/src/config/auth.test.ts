@@ -4,6 +4,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import { AuthType } from '@google/gemini-cli-core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
@@ -27,6 +30,31 @@ vi.mock('./settings.js', () => ({
     merged: vi.fn().mockReturnValue({}),
   }),
 }));
+
+/**
+ * Keep the suite off the developer's real `~/.gemini`.
+ *
+ * The gate reads `<home>/.gemini/openai-providers.json`, so on a machine that
+ * has providers configured — the normal state for anyone using OpenAI mode —
+ * the "nothing set" cases resolved a provider and flipped to `true`. That made
+ * the suite pass only on a machine with no providers, which is exactly the
+ * environment the bug being fixed never showed up in.
+ *
+ * Core's `homedir()` honours `GEMINI_CLI_HOME` on every call, so pointing it at
+ * an empty temporary directory is enough and needs no mocking.
+ */
+let isolatedHome: string;
+
+beforeEach(() => {
+  isolatedHome = fs.mkdtempSync(path.join(os.tmpdir(), 'auth-suite-home-'));
+  vi.stubEnv('GEMINI_CLI_HOME', isolatedHome);
+  vi.stubEnv('GEMINI_OPENAI_PROVIDER', undefined);
+});
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+  fs.rmSync(isolatedHome, { recursive: true, force: true });
+});
 
 describe('validateAuthMethod', () => {
   beforeEach(() => {

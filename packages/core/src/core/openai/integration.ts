@@ -29,6 +29,7 @@ import { getErrorMessage } from '../../utils/errors.js';
 import * as fs from 'node:fs';
 import {
   OPENAI_PROVIDER_ENV,
+  UnknownProviderError,
   getOpenAiProvidersPath,
   persistProviderModelId,
   resolveProvider,
@@ -177,13 +178,24 @@ export function resolveActiveProvider(options: {
       // A choice that came from the caller (`/provider`, or a provider named on
       // the command line) is a live instruction, so a bad id is a real error and
       // must stay one.
-      if (requestedId !== undefined) {
+      //
+      // A session-scoped choice may degrade, but only when the provider is
+      // simply absent from the file. Anything else — the entry exists and its
+      // credential variable is unset, its headers are invalid, the file cannot
+      // be read — means the provider the user picked is configured but broken,
+      // and swapping it out is wrong twice over: the error surfaced the
+      // *fallback* provider's name (so the user was told about "ytoken-01"
+      // after choosing "linksub-008"), and when the fallback happened to work
+      // the session silently moved to a different endpoint. Rethrowing keeps
+      // both failures attributable to the provider that actually has them.
+      if (
+        requestedId !== undefined ||
+        !(error instanceof UnknownProviderError)
+      ) {
         throw error;
       }
-      // A session-scoped choice can outlive its provider, because the CLI
-      // persists the selection to `settings.json` while the provider file is
-      // edited by hand. Degrade to the implicit resolution instead of making
-      // the CLI unstartable; `resolveImplicitProvider` reports why.
+      // The provider is gone: a hand-edited provider file must not leave the
+      // CLI unstartable. `resolveImplicitProvider` reports what took over.
       return resolveImplicitProvider(sessionProviderId, env);
     }
   }
@@ -200,10 +212,14 @@ export function resolveActiveProvider(options: {
  * committed to OpenAI-compatible mode (`allowImplicitProvider`), and the answer
  * has to match what the auth gate decided — see `resolveActiveProvider`.
  *
- * `staleId` is a selection that could not be resolved, such as a persisted
- * `security.auth.openAiProviderId` whose provider was removed or renamed. It is
+ * `staleId` is a selection whose provider is absent from the file — a persisted
+ * `security.auth.openAiProviderId` whose entry was removed or renamed. It is
  * reported to the user and then ignored, so a hand-edited provider file cannot
  * leave the CLI unable to start.
+ *
+ * Only absence reaches here. A provider that exists but is misconfigured (its
+ * credential variable unset, invalid headers) is *not* a stale choice and is
+ * never replaced by another endpoint; `resolveActiveProvider` rethrows it.
  */
 function resolveImplicitProvider(
   staleId: string | undefined,
@@ -213,7 +229,7 @@ function resolveImplicitProvider(
   if (staleId && fallback) {
     coreEvents.emitFeedback(
       'warning',
-      `The selected OpenAI provider "${staleId}" is no longer configured, so this session is using "${fallback.id}" instead. Run /provider to choose another.`,
+      `The selected OpenAI provider "${staleId}" is not configured in the provider file, so this session is using "${fallback.id}" instead. Run /provider to choose another.`,
     );
   }
   return fallback;
@@ -224,11 +240,19 @@ function resolveImplicitProvider(
  * environment variables.
  *
  * Used by the CLI's auth gate: a user whose endpoint lives only in the
- * provider file (chosen via `GEMINI_OPENAI_PROVIDER` or the file's first
- * entry) must not be forced through the endpoint dialog the single-endpoint
- * mode needs. Both a base URL and a model id are required — the dialog
- * collects exactly those two, and a provider without a model id cannot
+ * provider file must not be forced through the endpoint dialog the
+ * single-endpoint mode needs. Both a base URL and a model id are required — the
+ * dialog collects exactly those two, and a provider without a model id cannot
  * satisfy what the dialog would have provided.
+ *
+ * Which entry is judged is decided the same way the session builder decides,
+ * because the two must agree (see `resolveActiveProvider`). In order:
+ * `selectedProviderId` — the choice persisted in
+ * `security.auth.openAiProviderId` — then `GEMINI_OPENAI_PROVIDER`, then the
+ * file's first entry. Reading only `GEMINI_OPENAI_PROVIDER` meant a user who
+ * picked a provider with `/provider` was still judged by entry zero, so one
+ * incomplete entry at the top of the file sent a perfectly configured
+ * selection back through the endpoint dialog.
  *
  * This definition of "usable" is the contract the session-building path must
  * honour: the gate skipping the dialog only works if
@@ -237,34 +261,102 @@ function resolveImplicitProvider(
  * two in step — if this accepts something the builder cannot resolve, the
  * session ends up with no endpoint and fails at construction instead.
  *
- * Deliberately swallow errors: a malformed provider file, or one whose
- * permissions the loader rejects, must degrade to "not configured" (the
- * dialog) rather than become a new startup failure. The reason is reported
- * though — see `reportUnreadableProviderFile` — because the user otherwise
- * only sees the endpoint dialog, which describes nothing that is wrong.
+ * Deliberately swallow errors: a malformed provider file, an entry whose
+ * credential variable is unset, or one whose permissions the loader rejects
+ * must degrade to "not configured" (the dialog) rather than become a new
+ * startup failure. The reason is reported though — see
+ * `reportUnreadableProviderFile` and `describeUnusableOpenAiProvider` —
+ * because the user otherwise only sees the endpoint dialog, which describes
+ * nothing that is wrong.
  */
 export function hasResolvableOpenAiProvider(
   env?: Record<string, string | undefined>,
   filePath?: string,
+  selectedProviderId?: string,
 ): boolean {
+  const cleanEnv = toCleanEnv(env);
   try {
-    // Callers often hold `process.env`, whose values may be undefined;
-    // resolveProvider's contract takes defined strings only, so drop the
-    // holes instead of widening every resolver signature.
-    const cleanEnv = env
-      ? Object.fromEntries(
-          Object.entries(env).filter(
-            (entry): entry is [string, string] => entry[1] !== undefined,
-          ),
-        )
-      : undefined;
-    const requestedId = cleanEnv?.[OPENAI_PROVIDER_ENV];
+    const requestedId = pickRequestedId(cleanEnv, selectedProviderId);
     const profile = resolveProvider(requestedId, filePath, cleanEnv);
     return Boolean(profile?.baseUrl && profile?.modelId);
   } catch (error) {
+    // Silent by design: this runs from React render paths (see
+    // `isOpenAiEndpointConfigured`), so emitting here would repeat the warning
+    // on every render. `describeUnusableOpenAiProvider` is the reporting
+    // counterpart, called once from `validateAuthMethod`.
     reportUnreadableProviderFile(error, filePath);
     return false;
   }
+}
+
+/**
+ * Why the auth gate rejected a configured provider, for the startup error path.
+ *
+ * `hasResolvableOpenAiProvider` has to answer yes/no, and its `false` sends the
+ * user to a dialog or to the `GEMINI_OPENAI_BASE_URL` message — neither of
+ * which names the actual problem when a provider *is* configured but its
+ * credential variable is unset. This returns that reason so
+ * `validateAuthMethod` can report it verbatim instead.
+ *
+ * `null` when there is nothing provider-specific to say: no provider was named,
+ * the profile resolved, or the provider is absent (a stale preference the
+ * session builder degrades from with its own warning).
+ */
+export function describeUnusableOpenAiProvider(
+  env?: Record<string, string | undefined>,
+  filePath?: string,
+  selectedProviderId?: string,
+): string | null {
+  const cleanEnv = toCleanEnv(env);
+  const requestedId = pickRequestedId(cleanEnv, selectedProviderId);
+  if (!requestedId) {
+    return null;
+  }
+  try {
+    // Only the *failure* is reported here; whether the profile satisfies the
+    // gate is `hasResolvableOpenAiProvider`'s question, and a profile without a
+    // model id is the endpoint dialog's job rather than an error.
+    resolveProvider(requestedId, filePath, cleanEnv);
+    return null;
+  } catch (error) {
+    // An absent provider is a stale preference, which the session builder
+    // degrades from and reports itself. Anything else is the user's real
+    // problem: the entry exists, so its own name and variable belong in the
+    // message.
+    if (error instanceof UnknownProviderError) {
+      return null;
+    }
+    return getErrorMessage(error);
+  }
+}
+
+/**
+ * The provider id the gate and the builder both act on.
+ *
+ * Mirrors `resolveActiveProvider`: a persisted selection outranks
+ * `GEMINI_OPENAI_PROVIDER`, which outranks the file's first entry. Kept in one
+ * place so the two callers cannot drift.
+ */
+function pickRequestedId(
+  cleanEnv: Record<string, string> | undefined,
+  selectedProviderId: string | undefined,
+): string | undefined {
+  const persisted = selectedProviderId?.trim();
+  return persisted ? persisted : cleanEnv?.[OPENAI_PROVIDER_ENV];
+}
+
+/** Drops undefined values so resolvers can take a `Record<string, string>`. */
+function toCleanEnv(
+  env: Record<string, string | undefined> | undefined,
+): Record<string, string> | undefined {
+  if (!env) {
+    return undefined;
+  }
+  return Object.fromEntries(
+    Object.entries(env).filter(
+      (entry): entry is [string, string] => entry[1] !== undefined,
+    ),
+  );
 }
 
 /**

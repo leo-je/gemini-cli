@@ -643,6 +643,48 @@ function findEnvFile(
   }
 }
 
+/**
+ * The user-level `.env` files that {@link findEnvFile} skipped past.
+ *
+ * `findEnvFile` stops at the first match walking from the workspace up to the
+ * home directory, which is the right precedence — a project's `.env` should
+ * win where both define something. The problem is that it stops *entirely*: a
+ * project `.env` holding one unrelated variable made `<home>/.gemini/.env`
+ * unreadable, so every credential defined only there looked unset. The
+ * resulting error named whichever provider was consulted first, which is how a
+ * missing key turns into a confusing message about a different endpoint.
+ *
+ * These are loaded *after* the primary file, and only fill in keys that are
+ * still unset, so the precedence findEnvFile establishes is preserved rather
+ * than merged blindly.
+ *
+ * `ignoreLocalEnv` is honoured by carrying over the same rule: with it set, the
+ * project file was skipped in favour of the home one, and nothing else is left
+ * to add.
+ */
+function findUserLevelEnvFiles(primaryPath: string | null): string[] {
+  const candidates = [
+    path.join(homedir(), GEMINI_DIR, '.env'),
+    path.join(homedir(), '.env'),
+  ];
+  const seen = new Set<string>();
+  const files: string[] = [];
+  for (const candidate of candidates) {
+    const resolved = path.resolve(candidate);
+    if (resolved === (primaryPath && path.resolve(primaryPath))) {
+      continue;
+    }
+    if (seen.has(resolved)) {
+      continue;
+    }
+    seen.add(resolved);
+    if (fs.existsSync(resolved)) {
+      files.push(resolved);
+    }
+  }
+  return files;
+}
+
 // Internal env var used to preserve the user's original GOOGLE_CLOUD_PROJECT
 // across process restarts in Cloud Shell. This survives relaunch because child
 // processes inherit the parent's environment.
@@ -739,42 +781,74 @@ export function loadEnvironment(
   }
 
   if (envFilePath) {
-    // Manually parse and load environment variables to handle exclusions correctly.
-    // This avoids modifying environment variables that were already set from the shell.
-    try {
-      const envFileContent = fs.readFileSync(envFilePath, 'utf-8');
-      const parsedEnv = dotenv.parse(envFileContent);
+    loadEnvFileIntoProcess(envFilePath, settings, isTrusted);
+  }
 
-      const excludedVars =
-        settings?.advanced?.excludedEnvVars || DEFAULT_EXCLUDED_ENV_VARS;
-      const isProjectEnvFile = !envFilePath.includes(GEMINI_DIR);
+  // `findEnvFile` returns the first match, so whatever it chose hides the
+  // user-level file even when the two define entirely different variables.
+  // Loading the skipped user-level file second — after the primary one, and
+  // only filling keys that are still unset — keeps the precedence it chose
+  // while ending the case where a project `.env` with one unrelated entry made
+  // every credential in `~/.gemini/.env` look missing.
+  for (const fallbackPath of findUserLevelEnvFiles(envFilePath)) {
+    loadEnvFileIntoProcess(fallbackPath, settings, isTrusted);
+  }
+}
 
-      for (const key in parsedEnv) {
-        if (Object.hasOwn(parsedEnv, key)) {
-          let value = parsedEnv[key];
-          // If the workspace is untrusted, only allow whitelisted variables.
-          if (!isTrusted) {
-            if (!AUTH_ENV_VAR_WHITELIST.includes(key)) {
-              continue;
-            }
-            // Sanitize the value for untrusted sources
-            value = sanitizeEnvVar(value);
-          }
+/**
+ * Parses one `.env` file and copies its entries into `process.env`.
+ *
+ * Split out of `loadEnvironment` so the user-level fallback files go through
+ * exactly the same checks as the primary one; a second, laxer loader would be
+ * a way to slip an untrusted variable past the whitelist.
+ *
+ * Values already present in the environment are never overwritten — the shell
+ * outranks any file, and this also makes the fallback pass fill gaps only.
+ *
+ * Exported for tests, which need to assert the per-file rules directly.
+ *
+ * @internal
+ */
+export function loadEnvFileIntoProcess(
+  envFilePath: string,
+  settings: Settings,
+  isTrusted: boolean,
+): void {
+  // Manually parse and load environment variables to handle exclusions correctly.
+  // This avoids modifying environment variables that were already set from the shell.
+  try {
+    const envFileContent = fs.readFileSync(envFilePath, 'utf-8');
+    const parsedEnv = dotenv.parse(envFileContent);
 
-          // If it's a project .env file, skip loading excluded variables.
-          if (isProjectEnvFile && excludedVars.includes(key)) {
+    const excludedVars =
+      settings?.advanced?.excludedEnvVars || DEFAULT_EXCLUDED_ENV_VARS;
+    const isProjectEnvFile = !envFilePath.includes(GEMINI_DIR);
+
+    for (const key in parsedEnv) {
+      if (Object.hasOwn(parsedEnv, key)) {
+        let value = parsedEnv[key];
+        // If the workspace is untrusted, only allow whitelisted variables.
+        if (!isTrusted) {
+          if (!AUTH_ENV_VAR_WHITELIST.includes(key)) {
             continue;
           }
+          // Sanitize the value for untrusted sources
+          value = sanitizeEnvVar(value);
+        }
 
-          // Load variable only if it's not already set in the environment.
-          if (!Object.hasOwn(process.env, key)) {
-            process.env[key] = value;
-          }
+        // If it's a project .env file, skip loading excluded variables.
+        if (isProjectEnvFile && excludedVars.includes(key)) {
+          continue;
+        }
+
+        // Load variable only if it's not already set in the environment.
+        if (!Object.hasOwn(process.env, key)) {
+          process.env[key] = value;
         }
       }
-    } catch {
-      // Errors are ignored to match the behavior of `dotenv.config({ quiet: true })`.
     }
+  } catch {
+    // Errors are ignored to match the behavior of `dotenv.config({ quiet: true })`.
   }
 }
 

@@ -236,3 +236,120 @@ describe('Environment Isolation', () => {
     expect(process.env['GEMINI_API_KEY']).toBeUndefined();
   });
 });
+
+/**
+ * A project `.env` must not make the user-level file unreadable.
+ *
+ * `findEnvFile` returns the first match walking up from the workspace, so a
+ * project `.env` containing one unrelated variable hid `~/.gemini/.env`
+ * entirely. Every credential defined only there then looked unset, and the
+ * failure surfaced against whichever OpenAI provider was consulted first —
+ * which is how a missing key produced an error naming a different endpoint.
+ *
+ * The user-level file is now read afterwards as a fallback: it only fills keys
+ * that are still unset, so the precedence `findEnvFile` chose is preserved.
+ */
+describe('user-level .env fallback', () => {
+  const mockHome = path.resolve('/mock/home');
+  const mockWorkspace = path.resolve('/mock/workspace');
+  const originalArgv = process.argv;
+  const originalEnv = { ...process.env };
+  const homeGeminiEnv = path.join(mockHome, GEMINI_DIR, '.env');
+  const workspaceEnv = path.join(mockWorkspace, '.env');
+
+  beforeEach(() => {
+    vi.resetAllMocks();
+    vi.mocked(os.homedir).mockReturnValue(mockHome);
+    vi.mocked(coreHomedir).mockReturnValue(mockHome);
+    vi.mocked(fs.existsSync).mockReturnValue(false);
+    process.argv = ['node', 'gemini'];
+    delete process.env['GEMINI_API_KEY'];
+    delete process.env['SHARED_KEY'];
+  });
+
+  afterEach(() => {
+    process.argv = originalArgv;
+    process.env = { ...originalEnv };
+  });
+
+  it('fills keys the project .env does not define', () => {
+    vi.mocked(fs.existsSync).mockImplementation((p) => {
+      const ps = p.toString();
+      return ps === workspaceEnv || ps === homeGeminiEnv;
+    });
+    // The project file holds an unrelated variable only — the reported case.
+    vi.mocked(fs.readFileSync).mockImplementation((p) => {
+      const ps = p.toString();
+      if (ps === workspaceEnv) return 'NGROK_AUTHTOKEN=abc';
+      if (ps === homeGeminiEnv) return 'GEMINI_API_KEY=home-key';
+      return '';
+    });
+
+    loadEnvironment({} as Settings, mockWorkspace, () => ({
+      isTrusted: true,
+      source: 'file',
+    }));
+
+    expect(process.env['NGROK_AUTHTOKEN']).toBe('abc');
+    expect(process.env['GEMINI_API_KEY']).toBe('home-key');
+    delete process.env['NGROK_AUTHTOKEN'];
+  });
+
+  it('keeps the project value when both define the same key', () => {
+    vi.mocked(fs.existsSync).mockImplementation((p) => {
+      const ps = p.toString();
+      return ps === workspaceEnv || ps === homeGeminiEnv;
+    });
+    vi.mocked(fs.readFileSync).mockImplementation((p) => {
+      const ps = p.toString();
+      if (ps === workspaceEnv) return 'SHARED_KEY=project';
+      if (ps === homeGeminiEnv) return 'SHARED_KEY=home';
+      return '';
+    });
+
+    loadEnvironment({} as Settings, mockWorkspace, () => ({
+      isTrusted: true,
+      source: 'file',
+    }));
+
+    // Precedence is unchanged: what findEnvFile picked still wins.
+    expect(process.env['SHARED_KEY']).toBe('project');
+  });
+
+  it('still loads the home file when ignoreLocalEnv skips the project one', () => {
+    vi.mocked(fs.existsSync).mockImplementation((p) => {
+      const ps = p.toString();
+      return ps === workspaceEnv || ps === homeGeminiEnv;
+    });
+    vi.mocked(fs.readFileSync).mockImplementation((p) => {
+      const ps = p.toString();
+      if (ps === workspaceEnv) return 'GEMINI_API_KEY=project';
+      if (ps === homeGeminiEnv) return 'GEMINI_API_KEY=home-key';
+      return '';
+    });
+
+    loadEnvironment(
+      { advanced: { ignoreLocalEnv: true } } as Settings,
+      mockWorkspace,
+      () => ({ isTrusted: true, source: 'file' }),
+    );
+
+    expect(process.env['GEMINI_API_KEY']).toBe('home-key');
+  });
+
+  it('does not read the home file twice when it was the primary file', () => {
+    vi.mocked(fs.existsSync).mockImplementation(
+      (p) => p.toString() === homeGeminiEnv,
+    );
+    const readFileSync = vi.mocked(fs.readFileSync);
+    readFileSync.mockReturnValue('GEMINI_API_KEY=home-key');
+
+    loadEnvironment({} as Settings, mockHome, () => ({
+      isTrusted: true,
+      source: 'file',
+    }));
+
+    expect(process.env['GEMINI_API_KEY']).toBe('home-key');
+    expect(readFileSync).toHaveBeenCalledTimes(1);
+  });
+});
