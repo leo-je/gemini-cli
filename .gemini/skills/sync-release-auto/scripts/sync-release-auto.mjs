@@ -310,8 +310,29 @@ function decideVersion({ versions, branches, tags }) {
   };
 }
 
+/**
+ * `ls-remote` is subject to the same proxy resets as `fetch`, so it retries too:
+ * a version decision built on a half-read remote list could pick a version that
+ * already exists.
+ */
+function lsRemoteWithRetry(root, args, { attempts = 4, delayMs = 5000 } = {}) {
+  let lastError;
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    try {
+      return git(['ls-remote', ...args], { cwd: root });
+    } catch (error) {
+      lastError = error;
+      if (attempt < attempts) {
+        warn(`ls-remote attempt ${attempt}/${attempts} failed, retrying`);
+        execFileSync('sleep', [String(delayMs / 1000)]);
+      }
+    }
+  }
+  throw lastError;
+}
+
 function remoteBranches(root) {
-  return git(['ls-remote', '--heads', 'origin'], { cwd: root })
+  return lsRemoteWithRetry(root, ['--heads', 'origin'])
     .split('\n')
     .map((line) => line.split('\t')[1] ?? '')
     .map((ref) => ref.replace('refs/heads/', ''))
@@ -319,7 +340,7 @@ function remoteBranches(root) {
 }
 
 function remoteTags(root) {
-  return git(['ls-remote', '--tags', 'origin'], { cwd: root })
+  return lsRemoteWithRetry(root, ['--tags', 'origin'])
     .split('\n')
     .map((line) => line.split('\t')[1] ?? '')
     .map((ref) => ref.replace('refs/tags/', '').replace(/\^\{\}$/, ''))
@@ -1348,10 +1369,24 @@ async function cmdRun(root, flags) {
         allowFailure: true,
       })
     ) {
-      if (git(['ls-remote', '--exit-code', '--heads', 'origin', check.nextBranch], {
-        cwd: releasePath,
-        allowFailure: true,
-      })) {
+      // Distinguish "the branch exists" from "the remote could not be asked":
+      // with allowFailure both look falsy, so an unreachable remote would be
+      // read as "no such branch" and a pushed release branch could be reused.
+      let existing;
+      try {
+        existing = lsRemoteWithRetry(releasePath, [
+          '--exit-code',
+          '--heads',
+          'origin',
+          check.nextBranch,
+        ]);
+      } catch (error) {
+        abort(
+          `cannot tell whether ${check.nextBranch} exists on origin ` +
+            `(${messageOf(error).split('\n')[0]}); refusing to guess`,
+        );
+      }
+      if (existing) {
         abort(`${check.nextBranch} already exists on origin; refusing to reuse a pushed release branch`);
       }
       warn(`replacing the leftover local branch ${check.nextBranch} from the last aborted run`);
@@ -1541,7 +1576,7 @@ async function cmdRun(root, flags) {
     // that other branch onto the dev line. Move the ref directly instead, which
     // never touches HEAD.
     try {
-      git(['fetch', 'origin', '--quiet'], { cwd: root });
+      fetchWithRetry(root, ['--quiet', 'origin'], { attempts: 3 });
       const upstreamTip = git(['rev-parse', `origin/${SOURCE_BRANCH}`], { cwd: root });
       const localTip = git(['rev-parse', `refs/heads/${SOURCE_BRANCH}`], { cwd: root });
       // Only move the ref when HEAD is that branch; otherwise update-ref would
