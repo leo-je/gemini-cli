@@ -421,6 +421,30 @@ export function toProfile(
 }
 
 /**
+ * Raised when a provider was named but the file has no entry with that id.
+ *
+ * This is the one failure where degrading to another provider is defensible: a
+ * choice persisted in `settings.json` outlives the entry when the user removes
+ * or renames it by hand, and refusing to start would leave no way to recover.
+ *
+ * Every other failure — a missing credential variable, headers that fail
+ * validation, a file that cannot be read — means the provider *is* configured
+ * and broken. Degrading there would silently point the session at a different
+ * endpoint, so callers must rethrow instead. Typed rather than matched by
+ * message so a wording change cannot silently re-enable the swap.
+ */
+export class UnknownProviderError extends Error {
+  constructor(
+    readonly requestedId: string,
+    readonly knownIds: readonly string[],
+    message: string,
+  ) {
+    super(message);
+    this.name = 'UnknownProviderError';
+  }
+}
+
+/**
  * Resolves which provider the session should use, if any.
  *
  * Precedence is: an explicit session choice (the `/provider` command, held in
@@ -437,7 +461,9 @@ export function resolveProvider(
   const entries = loadProviderEntries(filePath);
   if (entries.length === 0) {
     if (requestedId) {
-      throw new Error(
+      throw new UnknownProviderError(
+        requestedId,
+        [],
         `No providers are configured in ${filePath}, so "${requestedId}" cannot be resolved. Run /provider add to create one.`,
       );
     }
@@ -450,9 +476,11 @@ export function resolveProvider(
 
   const entry = entries.find((candidate) => candidate.id === requestedId);
   if (!entry) {
-    const known = entries.map((candidate) => candidate.id).join(', ');
-    throw new Error(
-      `Unknown provider "${requestedId}". Configured providers: ${known}.`,
+    const knownIds = entries.map((candidate) => candidate.id);
+    throw new UnknownProviderError(
+      requestedId,
+      knownIds,
+      `Unknown provider "${requestedId}". Configured providers: ${knownIds.join(', ')}.`,
     );
   }
   return toProfile(entry, configEnv, filePath);

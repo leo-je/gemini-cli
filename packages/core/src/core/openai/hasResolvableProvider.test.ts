@@ -13,6 +13,7 @@ import { AuthType, type ContentGeneratorConfig } from '../contentGenerator.js';
 import { coreEvents } from '../../utils/events.js';
 import {
   applyProviderToContentGeneratorConfig,
+  describeUnusableOpenAiProvider,
   hasResolvableOpenAiProvider,
   resolveActiveProvider,
 } from './integration.js';
@@ -314,9 +315,210 @@ describe('an unusable provider file is reported, not just ignored', () => {
     const warn = vi
       .spyOn(coreEvents, 'emitFeedback')
       .mockImplementation(() => {});
-
     expect(hasResolvableOpenAiProvider({}, providersPath)).toBe(false);
     expect(warn).not.toHaveBeenCalled();
     warn.mockRestore();
+  });
+});
+
+/**
+ * A provider that exists but cannot be resolved is not a stale choice.
+ *
+ * The reported failure: choosing `linksub-008` produced
+ * `Failed to use provider "linksub-008": Provider "ytoken-01" references the
+ * environment variable …, which is not set.` The chosen provider was present
+ * and its own key was the one missing; the message named a different entry
+ * because the resolver degraded to the file's first provider and reported that
+ * provider's error instead. Worse, when the first provider's key *did* exist
+ * the degradation succeeded, silently moving the session to an endpoint the
+ * user never chose.
+ */
+describe('a selected provider that exists but is misconfigured', () => {
+  let fakeHome: string;
+
+  function writeDefaultProviders(providers: unknown[]): void {
+    const geminiDir = path.join(fakeHome, GEMINI_DIR_NAME);
+    fs.mkdirSync(geminiDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(geminiDir, 'openai-providers.json'),
+      JSON.stringify({ providers }, null, 2),
+      { encoding: 'utf8', mode: 0o600 },
+    );
+  }
+
+  const twoProviders = [
+    {
+      id: 'ytoken-01',
+      baseUrl: 'https://api.ytoken/v1',
+      // Test-unique names: `readEnvValue` falls back to `process.env` when the
+      // supplied env omits a key, so a realistic name that happens to be set on
+      // the machine running the suite would make the "unset" case succeed.
+      apiKeyEnv: 'TEST_UNSET_FALLBACK_KEY_ALPHA',
+      modelId: 'ytoken-model',
+    },
+    {
+      id: 'linksub-008',
+      baseUrl: 'https://api.linksub/v1',
+      apiKeyEnv: 'TEST_UNSET_CHOSEN_KEY_BETA',
+      modelId: 'deepseek-v4.1-flash',
+    },
+  ];
+
+  beforeEach(() => {
+    fakeHome = fs.mkdtempSync(path.join(os.tmpdir(), 'openai-misconfigured-'));
+    vi.stubEnv('HOME', fakeHome);
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    fs.rmSync(fakeHome, { recursive: true, force: true });
+  });
+
+  it('blames the chosen provider, not the first entry', () => {
+    writeDefaultProviders(twoProviders);
+
+    expect(() =>
+      resolveActiveProvider({
+        sessionProviderId: 'linksub-008',
+        env: {},
+        allowImplicitProvider: true,
+      }),
+    ).toThrow(/linksub-008.*TEST_UNSET_CHOSEN_KEY_BETA/);
+  });
+
+  it('does not silently switch endpoints when the fallback would work', () => {
+    // The dangerous variant: the first provider is fully usable, so degrading
+    // "succeeds" and the session talks to an endpoint the user never picked.
+    writeDefaultProviders(twoProviders);
+
+    expect(() =>
+      resolveActiveProvider({
+        sessionProviderId: 'linksub-008',
+        // Only the fallback's credential is available.
+        env: { TEST_UNSET_FALLBACK_KEY_ALPHA: 'sk-fallback' },
+        allowImplicitProvider: true,
+      }),
+    ).toThrow(/linksub-008/);
+  });
+
+  it('still degrades when the provider is genuinely absent', () => {
+    // The one case worth degrading: a persisted id whose entry was removed.
+    // Startup must survive that, on the file's first entry.
+    writeDefaultProviders(twoProviders);
+    const warn = vi
+      .spyOn(coreEvents, 'emitFeedback')
+      .mockImplementation(() => {});
+
+    const resolved = resolveActiveProvider({
+      sessionProviderId: 'deleted-provider',
+      env: { TEST_UNSET_FALLBACK_KEY_ALPHA: 'sk-fallback' },
+      allowImplicitProvider: true,
+    });
+
+    expect(resolved?.id).toBe('ytoken-01');
+    expect(warn).toHaveBeenCalledWith(
+      'warning',
+      expect.stringContaining('not configured'),
+    );
+    warn.mockRestore();
+  });
+});
+
+/**
+ * The gate must judge the entry the session will actually use.
+ *
+ * It previously read only `GEMINI_OPENAI_PROVIDER` and otherwise always
+ * resolved the file's first entry, ignoring the choice persisted in
+ * `security.auth.openAiProviderId`. With an incomplete first entry — one
+ * lacking a model id — a complete, explicitly chosen provider still failed the
+ * gate, and the user was told to set `GEMINI_OPENAI_BASE_URL`, which was never
+ * the problem.
+ */
+describe('hasResolvableOpenAiProvider and the persisted selection', () => {
+  it('accepts a selected provider that the first entry would fail', () => {
+    // Entry zero has no model id, so the first-entry rule rejects the file
+    // outright even though every key is present.
+    writeProviders({
+      providers: [
+        { id: 'ytoken-01', baseUrl: 'https://x/v1' },
+        { id: 'linksub-008', baseUrl: 'https://y/v1', modelId: 'm1' },
+      ],
+    });
+
+    expect(hasResolvableOpenAiProvider({}, providersPath)).toBe(false);
+    expect(hasResolvableOpenAiProvider({}, providersPath, 'linksub-008')).toBe(
+      true,
+    );
+  });
+
+  it('lets the persisted choice outrank GEMINI_OPENAI_PROVIDER', () => {
+    writeProviders({
+      providers: [
+        { id: 'a', baseUrl: 'https://a/v1', modelId: 'm-a' },
+        { id: 'b', baseUrl: 'https://b/v1', modelId: 'm-b' },
+      ],
+    });
+
+    // Entry `a` is fine and the env var names it, but the user picked `b`,
+    // which lacks a model id — the builder will use `b`, so the gate must
+    // judge `b`.
+    expect(
+      hasResolvableOpenAiProvider(
+        { GEMINI_OPENAI_PROVIDER: 'a' },
+        providersPath,
+        'b',
+      ),
+    ).toBe(true);
+  });
+
+  it('ignores a blank persisted id', () => {
+    writeProviders({
+      providers: [{ id: 'a', baseUrl: 'https://x/v1', modelId: 'm1' }],
+    });
+    expect(hasResolvableOpenAiProvider({}, providersPath, '   ')).toBe(true);
+  });
+});
+
+describe('describeUnusableOpenAiProvider', () => {
+  it('names the missing variable of the selected provider', () => {
+    writeProviders({
+      providers: [
+        {
+          id: 'linksub-008',
+          baseUrl: 'https://y/v1',
+          modelId: 'm1',
+          // Test-unique, so a same-named variable on the host cannot make this
+          // profile resolve and turn the assertion into a no-op.
+          apiKeyEnv: 'TEST_UNSET_CHOSEN_KEY_BETA',
+        },
+      ],
+    });
+
+    expect(
+      describeUnusableOpenAiProvider({}, providersPath, 'linksub-008'),
+    ).toMatch(/linksub-008.*TEST_UNSET_CHOSEN_KEY_BETA/);
+  });
+
+  it('says nothing when the selected provider is usable', () => {
+    writeProviders({
+      providers: [{ id: 'a', baseUrl: 'https://x/v1', modelId: 'm1' }],
+    });
+    expect(describeUnusableOpenAiProvider({}, providersPath, 'a')).toBeNull();
+  });
+
+  it('says nothing for a stale id, which degrades instead', () => {
+    writeProviders({
+      providers: [{ id: 'a', baseUrl: 'https://x/v1', modelId: 'm1' }],
+    });
+    expect(
+      describeUnusableOpenAiProvider({}, providersPath, 'deleted'),
+    ).toBeNull();
+  });
+
+  it('says nothing when no provider was named', () => {
+    writeProviders({
+      providers: [{ id: 'a', baseUrl: 'https://x/v1', modelId: 'm1' }],
+    });
+    expect(describeUnusableOpenAiProvider({}, providersPath)).toBeNull();
   });
 });

@@ -7,6 +7,7 @@
 import {
   AuthType,
   loadApiKey,
+  describeUnusableOpenAiProvider,
   hasResolvableOpenAiProvider,
   OPENAI_BASE_URL_ENV,
   OPENAI_BASE_URL_FALLBACK_ENV,
@@ -15,6 +16,19 @@ import {
   parseHeaderJson,
 } from '@google/gemini-cli-core';
 import { loadEnvironment, loadSettings } from './settings.js';
+import { readPersistedProviderId } from '../ui/openai/openAiProviderPreference.js';
+
+/**
+ * The provider the last start left in `security.auth.openAiProviderId`.
+ *
+ * The gate is told about it so a deliberate `/provider` choice is what gets
+ * judged, rather than whichever entry happens to sit first in the provider
+ * file. `loadSettings` is re-read here for the same reason `loadEnvironment`
+ * is: a selection written moments ago must be visible without a restart.
+ */
+function selectedProviderId(): string | undefined {
+  return readPersistedProviderId(loadSettings().merged);
+}
 
 /**
  * Whether OpenAI mode has the settings it cannot run without.
@@ -37,12 +51,16 @@ export function isOpenAiEndpointConfigured(): boolean {
   if (hasBaseUrl && hasModelId) {
     return true;
   }
-  // A provider profile (openai-providers.json, selected via
-  // GEMINI_OPENAI_PROVIDER or the file's first entry) is an equally valid
-  // endpoint configuration. It carries no environment variables, so without
-  // this check a provider-only setup would be sent to the endpoint dialog
-  // on every start.
-  return hasResolvableOpenAiProvider({ ...process.env });
+  // A provider profile (openai-providers.json, selected by the persisted
+  // `security.auth.openAiProviderId`, by GEMINI_OPENAI_PROVIDER, or by being the
+  // file's first entry) is an equally valid endpoint configuration. It carries
+  // no environment variables, so without this check a provider-only setup would
+  // be sent to the endpoint dialog on every start.
+  return hasResolvableOpenAiProvider(
+    { ...process.env },
+    undefined,
+    selectedProviderId(),
+  );
 }
 
 /**
@@ -104,16 +122,30 @@ export async function validateAuthMethod(
   }
 
   if (authMethod === AuthType.USE_OPENAI) {
+    const selected = selectedProviderId();
     // A resolvable provider profile satisfies the endpoint requirements on
     // its own; the environment-variable checks below describe the
     // single-endpoint configuration only.
-    if (hasResolvableOpenAiProvider({ ...process.env })) {
+    if (hasResolvableOpenAiProvider({ ...process.env }, undefined, selected)) {
       try {
         parseHeaderJson(process.env['GEMINI_OPENAI_HEADERS']);
       } catch (error) {
         return error instanceof Error ? error.message : String(error);
       }
       return null;
+    }
+    // The gate said no, but "no" covers two very different situations. When a
+    // provider was selected and exists yet cannot be resolved — its credential
+    // variable is unset, its headers are invalid — that reason is the whole
+    // story, and reporting it beats sending the user to look at
+    // GEMINI_OPENAI_BASE_URL, which was never the problem.
+    const providerFailure = describeUnusableOpenAiProvider(
+      { ...process.env },
+      undefined,
+      selected,
+    );
+    if (providerFailure) {
+      return providerFailure;
     }
     // Each setting falls back to the name the Gemini path already uses, so a
     // configuration written before the `GEMINI_OPENAI_*` prefix keeps working.
