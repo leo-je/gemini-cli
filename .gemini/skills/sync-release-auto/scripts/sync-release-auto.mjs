@@ -1120,11 +1120,50 @@ function acquireLock(root) {
   return () => rmSync(path, { force: true });
 }
 
+/**
+ * Fetch with bounded retries.
+ *
+ * GitHub over this host's proxy resets connections intermittently
+ * ("Recv failure: Connection reset by peer"): a single attempt failed on
+ * 2026-11-16 and again on 2026-11-17, while an immediate retry succeeded. A
+ * one-shot fetch therefore turns a transient network blip into a skipped day,
+ * so each remote is retried a few times before giving up.
+ */
+function fetchWithRetry(root, args, { attempts = 4, delayMs = 5000 } = {}) {
+  let lastError;
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    try {
+      git(['fetch', ...args], { cwd: root });
+      if (attempt > 1) {
+        ok(`fetch succeeded on attempt ${attempt}`);
+      }
+      return true;
+    } catch (error) {
+      lastError = error;
+      if (attempt < attempts) {
+        warn(`fetch attempt ${attempt}/${attempts} failed, retrying`);
+        execFileSync('sleep', [String(delayMs / 1000)]);
+      }
+    }
+  }
+  throw lastError;
+}
+
 async function cmdCheck(root, flags) {
   step('Check for upstream changes');
-  git(['fetch', '--prune', 'origin'], { cwd: root, allowFailure: true });
-  git(['fetch', '--prune', UPSTREAM_REMOTE], { cwd: root });
-  git(['fetch', '--tags', '--prune', 'origin'], { cwd: root, allowFailure: true });
+  // origin is best-effort (it is the fork's own remote and may be unreachable
+  // without blocking the check); upstream is mandatory and gets the retries.
+  try {
+    fetchWithRetry(root, ['--prune', 'origin'], { attempts: 2 });
+  } catch {
+    warn('origin fetch failed; continuing, the remote may be unreachable');
+  }
+  fetchWithRetry(root, ['--prune', UPSTREAM_REMOTE]);
+  try {
+    fetchWithRetry(root, ['--tags', '--prune', 'origin'], { attempts: 2 });
+  } catch {
+    warn('origin tag fetch failed; continuing');
+  }
 
   const upstreamSha = git(['rev-parse', `${UPSTREAM_REMOTE}/${UPSTREAM_BRANCH}`], { cwd: root });
   const behind = Number(
