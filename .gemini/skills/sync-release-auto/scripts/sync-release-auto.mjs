@@ -316,16 +316,25 @@ function decideVersion({ versions, branches, tags }) {
  * already exists.
  */
 function lsRemoteWithRetry(root, args, { attempts = 4, delayMs = 5000 } = {}) {
+  const usesExitCode = args.includes('--exit-code');
   let lastError;
   for (let attempt = 1; attempt <= attempts; attempt++) {
-    try {
-      return git(['ls-remote', ...args], { cwd: root });
-    } catch (error) {
-      lastError = error;
-      if (attempt < attempts) {
-        warn(`ls-remote attempt ${attempt}/${attempts} failed, retrying`);
-        execFileSync('sleep', [String(delayMs / 1000)]);
-      }
+    const result = runCapture('git', ['ls-remote', ...args], { cwd: root });
+    if (result.status === 0) {
+      return result.stdout;
+    }
+    // `--exit-code` reports "no matching ref" as status 2; that is an answer,
+    // not a failure, so it must not be retried or confused with an outage.
+    if (usesExitCode && result.status === 2) {
+      return '';
+    }
+    lastError = new Error(
+      `git ls-remote ${args.join(' ')} failed (status ${result.status})` +
+        (result.stderr ? `: ${result.stderr.trim()}` : ''),
+    );
+    if (attempt < attempts) {
+      warn(`ls-remote attempt ${attempt}/${attempts} failed, retrying`);
+      execFileSync('sleep', [String(delayMs / 1000)]);
     }
   }
   throw lastError;
