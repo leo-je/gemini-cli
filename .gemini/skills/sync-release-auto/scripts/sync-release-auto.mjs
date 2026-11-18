@@ -759,6 +759,31 @@ function removeWorktree(root, path) {
 }
 
 /**
+ * Declared dependencies with no installed copy.
+ *
+ * Compares the merged manifests against the shared node_modules; only names that
+ * are declared but absent are returned, so an unchanged tree costs nothing.
+ */
+function missingDependencies(root, worktree) {
+  const missing = new Set();
+  for (const [, dir] of WORKSPACE_PACKAGES) {
+    const manifestPath = join(worktree, 'packages', dir, 'package.json');
+    if (!existsSync(manifestPath)) continue;
+    const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
+    for (const field of ['dependencies', 'devDependencies', 'optionalDependencies']) {
+      for (const name of Object.keys(manifest[field] ?? {})) {
+        if (name.startsWith('@google/gemini-cli') || name === '@google/gemini-cli') continue;
+        if (name === 'gemini-cli-vscode-ide-companion') continue;
+        if (existsSync(join(root, 'node_modules', name))) continue;
+        if (existsSync(join(worktree, 'packages', dir, 'node_modules', name))) continue;
+        missing.add(name);
+      }
+    }
+  }
+  return [...missing].sort();
+}
+
+/**
  * Give the worktree a working dependency tree without a full `npm ci`.
  *
  * Two traps made this subtle enough to be worth spelling out:
@@ -1455,6 +1480,35 @@ async function cmdRun(root, flags) {
       }
     } catch (error) {
       warn(`lockfile reconcile skipped: ${error instanceof Error ? error.message : error}`);
+    }
+
+    // ------------------------------------------------------------------
+    step('Sync dependencies added by the upstream merge');
+    // ------------------------------------------------------------------
+    // The worktree reuses the main checkout's node_modules, which predates the
+    // merge. When upstream adds or bumps a dependency there are simply no files
+    // for it, and the build fails with "Cannot find module 're2js'" -- which
+    // looks like merge damage but is a stale install. Install any dependency the
+    // merged manifests declare but node_modules lacks, into the MAIN checkout so
+    // the next run starts warm too.
+    try {
+      const missing = missingDependencies(root, releasePath);
+      if (missing.length === 0) {
+        ok('no dependency is missing from the installed tree');
+      } else {
+        warn(`installing ${missing.length} dependency(ies) the merge added: ${missing.join(', ')}`);
+        run(
+          'node',
+          ['.gemini/skills/sync-release-auto/scripts/install-missing-deps.mjs', ...missing],
+          { cwd: root, env: gateEnv },
+        );
+        ok('dependencies installed into the main checkout');
+      }
+    } catch (error) {
+      abort(
+        `the merge added dependencies that could not be installed, so the build cannot ` +
+          `be trusted; nothing was pushed.\n${messageOf(error)}`,
+      );
     }
 
     // ------------------------------------------------------------------
