@@ -779,7 +779,12 @@ function missingDependencies(root, worktree) {
     const manifestPath = join(worktree, 'packages', dir, 'package.json');
     if (!existsSync(manifestPath)) continue;
     const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
-    for (const field of ['dependencies', 'devDependencies', 'optionalDependencies']) {
+    // Only mandatory dependencies are checked. `optionalDependencies` is where
+    // this repo puts per-platform native packages (`@lydell/node-pty-darwin-x64`
+    // and its siblings under `@lydell/node-pty`), and npm installs exactly the
+    // one that matches the host. Treating the others as missing aborted a run on
+    // 2026-11-19 for four packages that must never be installed here.
+    for (const field of ['dependencies', 'devDependencies']) {
       for (const name of Object.keys(manifest[field] ?? {})) {
         if (name.startsWith('@google/gemini-cli') || name === '@google/gemini-cli') continue;
         if (name === 'gemini-cli-vscode-ide-companion') continue;
