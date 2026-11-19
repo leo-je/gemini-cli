@@ -55,10 +55,13 @@ function declaredVersion(name) {
   return null;
 }
 
-const specs = names.map((name) => {
+const specs = names.map((arg) => {
+  // The caller may pass a full `name@spec`, which is preferred because it is the
+  // merged manifest's own pin. A bare name falls back to that manifest lookup.
+  if (/@[^@]+$/.test(arg) && !arg.startsWith('@')) return arg;
+  if (arg.startsWith('@') && arg.split('@').length > 2) return arg;
+  const name = arg;
   const version = declaredVersion(name);
-  // A caret/range spec is passed through; a bare name would install `latest`,
-  // which can disagree with what the merged manifest asked for.
   return version ? `${name}@${version}` : name;
 });
 
@@ -108,8 +111,14 @@ if (dirty) {
   process.exit(1);
 }
 
+/** `@scope/pkg@1.2.3` -> `@scope/pkg`. */
+const specName = (spec) => {
+  const at = spec.lastIndexOf('@');
+  return at > 0 ? spec.slice(0, at) : spec;
+};
+
 const stillMissing = specs
-  .map((spec) => spec.replace(/@[^@]*$/, ''))
+  .map(specName)
   .filter((name) => !existsSync(join(root, 'node_modules', name)));
 if (stillMissing.length > 0) {
   console.error(`still missing after install: ${stillMissing.join(', ')}`);

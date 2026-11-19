@@ -773,28 +773,64 @@ function removeWorktree(root, path) {
  * Compares the merged manifests against the shared node_modules; only names that
  * are declared but absent are returned, so an unchanged tree costs nothing.
  */
-function missingDependencies(root, worktree) {
-  const missing = new Set();
+/**
+ * Dependencies whose installed copy does not satisfy the merged manifests.
+ *
+ * Two cases matter and both broke a run:
+ *  - absent entirely (upstream added `re2js`)
+ *  - present at the wrong version (upstream bumped `simple-git` to 4.x and
+ *    `@opentelemetry/sdk-logs` to 0.222, which changes the types the source is
+ *    compiled against, so the stale copy fails typecheck)
+ * `optionalDependencies` is skipped: it holds per-platform native packages and
+ * npm installs only the one matching the host.
+ */
+function staleDependencies(root, worktree) {
+  const stale = new Map();
   for (const [, dir] of WORKSPACE_PACKAGES) {
     const manifestPath = join(worktree, 'packages', dir, 'package.json');
     if (!existsSync(manifestPath)) continue;
     const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
-    // Only mandatory dependencies are checked. `optionalDependencies` is where
-    // this repo puts per-platform native packages (`@lydell/node-pty-darwin-x64`
-    // and its siblings under `@lydell/node-pty`), and npm installs exactly the
-    // one that matches the host. Treating the others as missing aborted a run on
-    // 2026-11-19 for four packages that must never be installed here.
     for (const field of ['dependencies', 'devDependencies']) {
-      for (const name of Object.keys(manifest[field] ?? {})) {
+      for (const [name, wanted] of Object.entries(manifest[field] ?? {})) {
         if (name.startsWith('@google/gemini-cli') || name === '@google/gemini-cli') continue;
         if (name === 'gemini-cli-vscode-ide-companion') continue;
-        if (existsSync(join(root, 'node_modules', name))) continue;
-        if (existsSync(join(worktree, 'packages', dir, 'node_modules', name))) continue;
-        missing.add(name);
+        if (!existsSync(join(root, 'node_modules', name))) {
+          stale.set(name, wanted);
+          continue;
+        }
+        const installedPath = join(root, 'node_modules', name, 'package.json');
+        if (!existsSync(installedPath)) continue;
+        const installed = JSON.parse(readFileSync(installedPath, 'utf8')).version;
+        if (!versionSatisfies(installed, wanted)) {
+          stale.set(name, wanted);
+        }
       }
     }
   }
-  return [...missing].sort();
+  return stale;
+}
+
+/** Enough semver for pinned specs: `1.2.3`, `^1.2.3`, `~1.2.3`, `>=1.2.3`. */
+function versionSatisfies(installed, wanted) {
+  if (typeof wanted !== 'string') return true;
+  const wantedCore = wanted.replace(/^[\^~>=<]+/, '').trim();
+  if (!/^\d/.test(wantedCore)) return true; // file:, workspace:, git urls
+  const [wi, wi2, wi3] = wantedCore.split('.').map((part) => Number.parseInt(part, 10));
+  const [ii, ii2, ii3] = String(installed)
+    .replace(/^[\^~v]/, '')
+    .split('.')
+    .map((part) => Number.parseInt(part, 10));
+  const rank = (a, a2, a3, b, b2, b3) => (a - b) || (a2 - b2) || (a3 - b3);
+  if (wanted.startsWith('^')) {
+    // Caret keeps the leftmost non-zero component fixed.
+    if (wi > 0) return ii === wi && rank(ii, ii2, ii3, wi, wi2, wi3) >= 0;
+    if (wi2 > 0) return ii === 0 && ii2 === wi2 && rank(0, ii2, ii3, 0, wi2, wi3) >= 0;
+    return ii === 0 && ii2 === 0 && ii3 === wi3;
+  }
+  if (wanted.startsWith('~')) {
+    return ii === wi && ii2 === wi2 && rank(0, 0, ii3, 0, 0, wi3) >= 0;
+  }
+  return rank(ii, ii2, ii3, wi, wi2, wi3) === 0;
 }
 
 /**
@@ -1506,14 +1542,15 @@ async function cmdRun(root, flags) {
     // merged manifests declare but node_modules lacks, into the MAIN checkout so
     // the next run starts warm too.
     try {
-      const missing = missingDependencies(root, releasePath);
-      if (missing.length === 0) {
-        ok('no dependency is missing from the installed tree');
+      const stale = staleDependencies(root, releasePath);
+      if (stale.size === 0) {
+        ok('every declared dependency is installed at a satisfying version');
       } else {
-        warn(`installing ${missing.length} dependency(ies) the merge added: ${missing.join(', ')}`);
+        const specs = [...stale].map(([name, wanted]) => `${name}@${wanted}`);
+        warn(`installing ${specs.length} dependency(ies) the merge added or bumped: ${specs.join(', ')}`);
         run(
           'node',
-          ['.gemini/skills/sync-release-auto/scripts/install-missing-deps.mjs', ...missing],
+          ['.gemini/skills/sync-release-auto/scripts/install-missing-deps.mjs', ...specs],
           { cwd: root, env: gateEnv },
         );
         ok('dependencies installed into the main checkout');
