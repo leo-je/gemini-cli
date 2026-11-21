@@ -768,6 +768,27 @@ function removeWorktree(root, path) {
 }
 
 /**
+ * Re-install the main checkout's dependency tree from its lockfile.
+ *
+ * The merged lockfile is the authority, so this is a plain `npm ci`: resolving
+ * individual packages cannot work because the repo pins several of them through
+ * `overrides`. It is slow (this tree is ~1400 packages and took 8-19 minutes),
+ * which is why it only runs when the merge actually changed dependencies.
+ */
+function installFromLockfile(root) {
+  log('  → npm ci (this tree is large; expect several minutes)');
+  run('npm', ['ci', '--ignore-scripts', '--no-audit', '--no-fund'], {
+    cwd: root,
+    env: {
+      ...gateEnv,
+      // A dropped connection mid-download fails the whole install otherwise.
+      npm_config_fetch_retries: '5',
+      npm_config_fetch_retry_maxtimeout: '120000',
+    },
+  });
+}
+
+/**
  * Declared dependencies with no installed copy.
  *
  * Compares the merged manifests against the shared node_modules; only names that
@@ -1533,32 +1554,43 @@ async function cmdRun(root, flags) {
     }
 
     // ------------------------------------------------------------------
-    step('Sync dependencies added by the upstream merge');
+    step('Sync dependencies for the merged manifests');
     // ------------------------------------------------------------------
-    // The worktree reuses the main checkout's node_modules, which predates the
-    // merge. When upstream adds or bumps a dependency there are simply no files
-    // for it, and the build fails with "Cannot find module 're2js'" -- which
-    // looks like merge damage but is a stale install. Install any dependency the
-    // merged manifests declare but node_modules lacks, into the MAIN checkout so
-    // the next run starts warm too.
+    // The worktree reuses the MAIN checkout's node_modules. When upstream
+    // changes dependencies, that tree is stale: the first failure was a missing
+    // module, then a flood of type errors from bumped packages.
+    //
+    // Installing only the changed packages does not work: `npm install pkg@ver`
+    // rebuilds the tree and collides with this repo's `overrides` pin (EOVERRIDE
+    // on glob), and the merged manifest set has to be resolved as a whole
+    // anyway. So a dependency change re-installs from the merged lockfile.
     try {
       const stale = staleDependencies(root, releasePath);
-      if (stale.size === 0) {
-        ok('every declared dependency is installed at a satisfying version');
+      const lockChanged = git(
+        ['diff', '--name-only', 'HEAD~1', '--', 'package-lock.json'],
+        { cwd: releasePath, allowFailure: true },
+      );
+      if (stale.size === 0 && !lockChanged) {
+        ok('installed dependencies already satisfy the merged manifests');
       } else {
-        const specs = [...stale].map(([name, wanted]) => `${name}@${wanted}`);
-        warn(`installing ${specs.length} dependency(ies) the merge added or bumped: ${specs.join(', ')}`);
-        run(
-          'node',
-          ['.gemini/skills/sync-release-auto/scripts/install-missing-deps.mjs', ...specs],
-          { cwd: root, env: gateEnv },
+        warn(
+          stale.size > 0
+            ? `the merge changed ${stale.size} dependency(ies); re-installing from the merged lockfile`
+            : 'the merge changed package-lock.json; re-installing from it',
         );
-        ok('dependencies installed into the main checkout');
+        if (dryRun) {
+          warn('dry-run: skipped the install, so the build below may fail');
+        } else {
+          // Install in the MAIN checkout so the gate and the next run both see
+          // it; the worktree links to it.
+          installFromLockfile(root);
+          ok('dependencies re-installed from the merged lockfile');
+        }
       }
     } catch (error) {
       abort(
-        `the merge added dependencies that could not be installed, so the build cannot ` +
-          `be trusted; nothing was pushed.\n${messageOf(error)}`,
+        `dependencies could not be installed, so the build cannot be trusted; ` +
+          `nothing was pushed.\n${messageOf(error)}`,
       );
     }
 
