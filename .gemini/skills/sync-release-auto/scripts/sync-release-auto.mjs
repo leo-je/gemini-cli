@@ -780,7 +780,10 @@ function installFromLockfile(root) {
   run('npm', ['ci', '--ignore-scripts', '--no-audit', '--no-fund'], {
     cwd: root,
     env: {
-      ...gateEnv,
+      // cleanEnv(), not gateEnv: this runs before resolveNodeEnv(), and the
+      // cache redirect in cleanEnv() is what avoids this host's root-owned
+      // ~/.npm entries failing the install with EPERM.
+      ...cleanEnv(),
       // A dropped connection mid-download fails the whole install otherwise.
       npm_config_fetch_retries: '5',
       npm_config_fetch_retry_maxtimeout: '120000',
