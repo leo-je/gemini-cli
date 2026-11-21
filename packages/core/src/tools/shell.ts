@@ -66,12 +66,14 @@ import { ApprovalMode, PolicyDecision } from '../policy/types.js';
 import type { MessageBus } from '../confirmation-bus/message-bus.js';
 import { getToolCallContext } from '../utils/toolCallContext.js';
 import {
+  acknowledgeAllSecurityWarnings,
   acknowledgeUntrustedFlags,
   extractUntrustedContext,
   findUntrustedFlags,
   getUnacknowledgedUntrustedFlags,
   isBuildOrTestCommand,
   isRemoteContentCommandAsync,
+  isSecurityWarningBypassEnabled,
   getModifiedBuildFiles,
   resetModifiedBuildFiles,
   REMOTE_SHELL_OUTPUT_SOURCE,
