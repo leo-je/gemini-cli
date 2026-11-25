@@ -161,6 +161,60 @@ describe('OpenAICompatibleClient', () => {
     expect(headers['Authorization']).toBeUndefined();
   });
 
+  it('honours a configured headers timeout instead of the 60s default', async () => {
+    // The abort reason is the only observable difference: a short configured
+    // timeout must fire long before the fallback would.
+    const fetchMock = vi.fn(
+      (_url: string, init: RequestInit) =>
+        new Promise<Response>((_resolve, reject) => {
+          init.signal?.addEventListener('abort', () =>
+            reject(init.signal?.reason as Error),
+          );
+        }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const client = new OpenAICompatibleClient({
+      baseUrl: 'http://localhost:11434/v1',
+      apiKey: '',
+      headersTimeoutMs: 25,
+    });
+
+    await expect(
+      client.chatCompletion({ model: 'm', messages: [] }),
+    ).rejects.toThrow('Request headers timed out');
+  });
+
+  it('falls back to the 60s default when no timeout is configured', async () => {
+    vi.useFakeTimers();
+    try {
+      const fetchMock = vi.fn(
+        (_url: string, init: RequestInit) =>
+          new Promise<Response>((_resolve, reject) => {
+            init.signal?.addEventListener('abort', () =>
+              reject(init.signal?.reason as Error),
+            );
+          }),
+      );
+      vi.stubGlobal('fetch', fetchMock);
+
+      const client = new OpenAICompatibleClient({
+        baseUrl: 'http://localhost:11434/v1',
+        apiKey: '',
+      });
+      const pending = client.chatCompletion({ model: 'm', messages: [] });
+      // Swallow the rejection while the timer advances.
+      pending.catch(() => undefined);
+
+      await vi.advanceTimersByTimeAsync(59_000);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(2_000);
+      await expect(pending).rejects.toThrow('Request headers timed out');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('does not attach a proxy dispatcher when no proxy is configured', async () => {
     const fetchMock = vi
       .fn()

@@ -136,6 +136,10 @@ export class OpenAIContentGenerator implements ContentGenerator {
       apiKey: config.apiKey ?? '',
       proxy: config.proxy,
       headers: { ...config.customHeaders, ...configuredHeaders },
+      // `model.requestTimeoutMs` / `GEMINI_API_HEADERS_TIMEOUT_MS` already drive
+      // the Gemini path. Passing it here stops slow OpenAI endpoints from dying
+      // at the hardcoded 60s with "Request headers timed out".
+      headersTimeoutMs: gcConfig.getRequestTimeoutMs(),
     });
   }
 

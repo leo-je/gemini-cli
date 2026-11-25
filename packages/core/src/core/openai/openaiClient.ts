@@ -33,8 +33,14 @@ import type {
   OpenAIEmbeddingResponse,
 } from './types.js';
 
-/** Mirrors the header timeout used by `utils/fetch.ts`. */
-const HEADERS_TIMEOUT_MS = 60_000;
+/**
+ * Fallback header timeout, mirroring `utils/fetch.ts`.
+ *
+ * The effective value comes from the user's configuration (`model.requestTimeoutMs`
+ * or `GEMINI_API_HEADERS_TIMEOUT_MS`); see `headersTimeoutMs` below. This constant
+ * is only used when nothing is configured.
+ */
+const DEFAULT_HEADERS_TIMEOUT_MS = 60_000;
 /** Mirrors the body timeout used by `utils/fetch.ts`, applied per streamed event. */
 const STREAM_IDLE_TIMEOUT_MS = 300_000;
 
@@ -426,11 +432,22 @@ export class OpenAICompatibleClient {
    */
   private readonly fetchImpl: typeof fetch;
 
+  /**
+   * How long to wait for response headers before failing the request.
+   *
+   * A slow reasoning model on a crowded endpoint routinely takes longer than a
+   * minute before it sends headers, and the failure surfaces as the opaque
+   * "Request headers timed out". Callers pass the user's configured value so
+   * `model.requestTimeoutMs` / `GEMINI_API_HEADERS_TIMEOUT_MS` actually apply.
+   */
+  private readonly headersTimeoutMs: number;
+
   constructor(options: {
     baseUrl: string;
     apiKey: string;
     proxy?: string;
     headers?: Record<string, string>;
+    headersTimeoutMs?: number;
   }) {
     if (!options.baseUrl) {
       throw new Error(
@@ -439,6 +456,11 @@ export class OpenAICompatibleClient {
     }
     this.baseUrl = options.baseUrl;
     this.apiKey = options.apiKey;
+    this.headersTimeoutMs =
+      typeof options.headersTimeoutMs === 'number' &&
+      options.headersTimeoutMs > 0
+        ? options.headersTimeoutMs
+        : DEFAULT_HEADERS_TIMEOUT_MS;
     this.extraHeaders = options.headers ?? {};
     this.dispatcher = this.resolveDispatcher(options.proxy);
     this.fetchImpl = this.dispatcher
@@ -513,7 +535,7 @@ export class OpenAICompatibleClient {
     signal: AbortSignal | undefined,
   ): Promise<PendingResponse> {
     const url = resolveEndpointUrl(this.baseUrl, path);
-    const bounded = buildBoundedSignal(signal, HEADERS_TIMEOUT_MS);
+    const bounded = buildBoundedSignal(signal, this.headersTimeoutMs);
     const options: FetchOptions = {
       method: 'POST',
       headers: this.buildHeaders(accept),
@@ -630,7 +652,7 @@ export class OpenAICompatibleClient {
    */
   async listModels(signal?: AbortSignal): Promise<RemoteModel[]> {
     const url = resolveEndpointUrl(this.baseUrl, '/models');
-    const bounded = buildBoundedSignal(signal, HEADERS_TIMEOUT_MS);
+    const bounded = buildBoundedSignal(signal, this.headersTimeoutMs);
     const options: FetchOptions = {
       method: 'GET',
       headers: this.buildHeaders('application/json'),

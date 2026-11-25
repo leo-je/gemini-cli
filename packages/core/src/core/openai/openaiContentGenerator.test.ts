@@ -56,6 +56,9 @@ function makeGenerator(
   // it because the CLI treats the two as the same choice.
   const gcConfig = {
     env,
+    // The generator forwards this to the HTTP client; `undefined` means "use the
+    // built-in 60s default", which is what these tests exercise.
+    getRequestTimeoutMs: () => undefined,
     getActiveModel: () => activeModel ?? env['GEMINI_MODEL'] ?? 'gemini-3-pro',
     getOpenAiOpencodeHeaders: () => opencodeHeaders,
     get model() {
@@ -346,6 +349,7 @@ describe('OpenAIContentGenerator', () => {
     };
     const gcConfig = {
       env: { GEMINI_OPENAI_MODELID: 'env-model' },
+      getRequestTimeoutMs: () => undefined,
       getActiveModel: () => active,
     } as unknown as Config;
     const generator = new OpenAIContentGenerator(config, gcConfig);
